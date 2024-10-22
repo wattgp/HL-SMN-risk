@@ -18,6 +18,7 @@ format: "docx"
 
 library(tidyverse)
 library(readxl)
+library(stringr)
 
 knitr::opts_chunk$set(warning = F, error = F, message = F, echo = F)
 
@@ -36,33 +37,141 @@ dta0 <- readxl::read_xlsx("/Volumes/g.watt/HL/SMN-risk/secure_data/2024-08-20 Re
 
 #| label: prepare-outcome-variables
 
+# dictionary for 2nd cancer sites
+
+
+
 dta1 = dta0 %>% tidyr::unite(
+  
+  # create date variables
+  
   dob, c(m_birth, y_birth), sep = "-", remove = F
 ) %>% tidyr::unite(
   ddx, c(m_diagnose, y_diagnose), sep = "-", remove = F
 ) %>% tidyr::unite(
-  d_sm1, c(m_smn1, y_smn1), sep = "-", remove = F
+  d_smn1, c(m_smn1, y_smn1), sep = "-", remove = F
 ) %>% tidyr::unite(
-  d_sm1, c(m_smn2, y_smn2), sep = "-", remove = F
+  d_smn2, c(m_smn2, y_smn2), sep = "-", remove = F
 ) %>% tidyr::unite(
-  d_sm1, c(m_smn3, y_smn3), sep = "-", remove = F
+  d_smn3, c(m_smn3, y_smn3), sep = "-", remove = F
 ) %>% tidyr::unite(
-  d_sm1, c(m_smn4, y_smn4), sep = "-", remove = F
+  d_smn4, c(m_smn4, y_smn4), sep = "-", remove = F
 ) %>% tidyr::unite(
-  d_sm1, c(m_smn5, y_smn5), sep = "-", remove = F
+  d_smn5, c(m_smn5, y_smn5), sep = "-", remove = F
 ) %>% tidyr::unite(
-  d_sm1, c(m_smn6, y_smn6), sep = "-", remove = F
+  d_smn6, c(m_smn6, y_smn6), sep = "-", remove = F
 ) %>% tidyr::unite(
-  d_sm1, c(m_smn7, y_smn7), sep = "-", remove = F
+  d_smn7, c(m_smn7, y_smn7), sep = "-", remove = F
+) %>% mutate(
+  dob = lubridate::parse_date_time(dob, "my"),
+  ddx = lubridate::parse_date_time(ddx, "my"),
+  d_smn1 = lubridate::parse_date_time(d_smn1, "my"),
+  d_smn2 = lubridate::parse_date_time(d_smn2, "my"),
+  d_smn3 = lubridate::parse_date_time(d_smn3, "my"),
+  d_smn4 = lubridate::parse_date_time(d_smn4, "my"),
+  d_smn5 = lubridate::parse_date_time(d_smn5, "my"),
+  d_smn6 = lubridate::parse_date_time(d_smn6, "my"),
+  d_smn7 = lubridate::parse_date_time(d_smn7, "my"),
+  
+  # indicator for malignant only
+  
+  smn1_mal = ifelse(smn1_behav %in% c(3,6,9),1,0),
+  smn2_mal = ifelse(smn2_behav %in% c(3,6,9),1,0), 
+  smn3_mal = ifelse(smn3_behav %in% c(3,6,9),1,0),
+  smn4_mal = ifelse(smn4_behav %in% c(3,6,9),1,0),
+  smn5_mal = ifelse(smn5_behav %in% c(3,6,9),1,0),
+  smn6_mal = ifelse(smn6_behav %in% c(3,6,9),1,0),
+  smn7_mal = ifelse(smn7_behav %in% c(3,6,9),1,0),
+  
+  # date of first malignant smn
+  
+  d_1st_inv = case_when(
+    smn1_mal == 1 ~ d_smn1,
+    smn1_mal == 0 & smn2_mal == 1 ~ d_smn2,
+    smn1_mal == 0 & smn2_mal == 0 &
+      smn3_mal == 1 ~ d_smn3,
+    smn1_mal == 0 & smn2_mal == 0 &
+      smn3_mal == 0 & smn4_mal ==1 ~ d_smn4,
+    smn1_mal == 0 & smn2_mal == 0 &
+      smn3_mal == 0 & smn4_mal == 0 &
+      smn5_mal == 1 ~ d_smn5,
+    smn1_mal == 0 & smn2_mal == 0 &
+      smn3_mal == 0 & smn4_mal == 0 &
+      smn5_mal == 0 & smn6_mal == 1 ~ d_smn6,
+    smn1_mal == 0 & smn2_mal == 0 &
+      smn3_mal == 0 & smn4_mal == 0 &
+      smn5_mal == 0 & smn6_mal == 0 & 
+      smn7_mal == 1 ~ d_smn7
+  ),
+  
+  # categories for SMN site
+  
+  # first, make numeric vars
+  across(
+      .cols = contains("_site"),
+      .fns = ~as.numeric(stringr::str_remove(., "C")),
+      .names = "{.col}_num"
+      ),
+  across(
+    .cols = contains("_num"),
+    .fns = ~case_when(
+     (. < 150) | (. >= 300 & . <338) | (.==760) ~ "Head and neck",
+     .==15 | (. >= 150 & . <160) | (. == 339) ~ "Esophagus/Trachea",
+     (. >= 160 & . <220) | (.>= 480 & .<490) | .==762 ~ "Gastrointestinal tract",
+     .==22 | (. >= 220 & . <250) ~ "Liver/IHD/Biliary tract",
+     .==34 | (. >= 340 & . <349) ~ "Lung/Bronchus",
+     (. >= 379 & . <399) | .==761 ~ "Other intrathoracic"
+     (. >= 410 & .<419) | (. >= 490 & . < 500) ~ "Sarcoma",
+     .==77 | (.>=770 & .<800) ~ "Lymphoma",
+     .==42 | (. >= 420 & <424) ~ "Hematological"
+     .==44 | (.>=440 & .< 470) ~ "Skin",
+     .==72 | (.>=470 & <479) | (.>=690 & .<=729)~ "Brain and Nervous System", # including 1 choroid (eye) cancer
+     .==50 | (.>=500 & <510) ~ "Breast",
+     (.>=510 & .<=529) | (.==579)~ "Vulva/vagina",
+     .==53 | (.>=530 & .< 540) ~ "Cervix",
+     .==54 | (.>=540 & .<560) ~ "Uterus",
+     (.>=569 & <=570) | (.==589) ~ "Ovary/Fallopian tube", # note includes 1 placenta
+     .>==619 ~ "Prostate",
+     .==62 | (.>=60 & .<=619) | (.>=620 & .<639), ~ "Other male genital",
+     .>640 & .<690 ~ "Urinary tract", # including kidney
+     .==73 | (.>=730 & .<740) ~ "Thyroid",
+     (.>=740 <760) ~ "Other endocrine",
+     # no cases for 762 769 (other undefined)
+     #*---------------
+     #*
+     #*
+  
+     # morphology
+     across(
+    .cols = contains("_morph"),
+    .fns = ~case_when(
+    )
+     
+     
+    
+     
+     
+     
+     .names = "_group"
+    )
+  )
+#   smn1_site_num = as.numeric(stringr::str_remove(dta0$smn1_site, "C"))
+# )
+#   smn1_cat = across(
+#     case_when(
+#     smn1_site_num < 150 ~ "Head and neck",
+#     smn_site_num >= 150 & smn1_site_num <160 ~ "Esophagus",
+#     smn_site_num >= 160 & smn1_site_num <220 ~ "Gastrointestinal (inc. stomach)",
+#     smn_site_num >= 160 & smn1_site_num <220
+      
+    )
+  )
+  
+  smn1_sitegr = 
+  
+  
 )
   
-  mutate(
-  dob = lubridate::parse_date_time(dob, "my"),
-  ddx = lubridate::parse_date_time(ddx, "my")
-)
-
-
-
 
 %>% filter(
   is.na(dob), # n = 3
