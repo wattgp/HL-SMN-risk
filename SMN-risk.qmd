@@ -17,12 +17,55 @@ format: "docx"
 #| label: load-packages
 
 library(tidyverse)
+library(readxl)
 
+knitr::opts_chunk$set(warning = F, error = F, message = F, echo = F)
 
 ```
 
 ```{r}
 
-#| label: 
+#| label: read-data
 
+dta0 <- readxl::read_xlsx("/Volumes/g.watt/HL/SMN-risk/secure_data/2024-08-20 Research Hodgkin cohort.xlsx")
+
+```
+
+
+```{r}
+
+#| label: prepare-outcome-variables
+
+dta1 = dta0 %>% tidyr::unite(
+  dob, c(m_birth, y_birth), sep = "-", remove = F
+) %>% tidyr::unite(
+  ddx, c(m_diagnose, y_diagnose), sep = "-", remove = F
+) %>% tidyr::unite(
+  d_sm1, c(m_smn1, y_smn1), sep = "-", remove = F
+) %>% tidyr::unite(
+  d_sm1, c(m_smn2, y_smn2), sep = "-", remove = F
+) %>% tidyr::unite(
+  d_sm1, c(m_smn3, y_smn3), sep = "-", remove = F
+) %>% tidyr::unite(
+  d_sm1, c(m_smn4, y_smn4), sep = "-", remove = F
+) %>% tidyr::unite(
+  d_sm1, c(m_smn5, y_smn5), sep = "-", remove = F
+) %>% tidyr::unite(
+  d_sm1, c(m_smn6, y_smn6), sep = "-", remove = F
+) %>% tidyr::unite(
+  d_sm1, c(m_smn7, y_smn7), sep = "-", remove = F
+)
+  
+  mutate(
+  dob = lubridate::parse_date_time(dob, "my"),
+  ddx = lubridate::parse_date_time(ddx, "my")
+)
+
+
+
+
+%>% filter(
+  is.na(dob), # n = 3
+  is.na(ddx), # n = 
+)
 ```
