@@ -1,11 +1,28 @@
 ---
-title: "SMN-risk"
+title: "SMN-risk: an update from the Hodgkin Lymphoma survivorship cohort"
+author: "Gordon P. Watt, PhD"
+date: "`Sys.Date()`"
+execute:
+  echo: false
+  warning: false
+  error: false
+  message: false
+format: "docx"
+
+
 ---
 
-## Quarto
+```{r}
 
-Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+#| label: load-packages
+
+library(tidyverse)
+
+
+```
 
 ```{r}
-1 + 1
+
+#| label: 
+
 ```
