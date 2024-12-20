@@ -7,7 +7,7 @@ execute:
   warning: false
   error: false
   message: false
-format: "docx"
+format: docx
 
 
 ---
@@ -17,8 +17,18 @@ format: "docx"
 #| label: load-packages
 
 library(tidyverse)
+library(ggplot2)
 library(readxl)
 library(stringr)
+library(survival)
+library(ggsurvfit)
+library(tidycmprsk)
+library(Hmisc)
+library(gt)
+library(ggpubr)
+library(gtsummary)
+library(flextable)
+library(cmprsk)
 
 knitr::opts_chunk$set(warning = F, error = F, message = F, echo = F)
 
@@ -28,13 +38,26 @@ knitr::opts_chunk$set(warning = F, error = F, message = F, echo = F)
 
 #| label: read-data
 
-if (file.exists("U://HL/SMN-risk/secure_data/2024-08-20 Research Hodgkin cohort.xlsx")) {
+# if (file.exists("U://HL/SMN-risk/secure_data/2024-08-20 Research Hodgkin cohort.xlsx")) {
+#   # tries Windows MDW version first
+# dta00 <- readxl::read_xlsx("U://HL/SMN-risk/secure_data/2024-08-20 Research Hodgkin cohort.xlsx")
+# } else {
+#   # then reads Mac Volumes
+#   dta00 <- readxl::read_xlsx("/Volumes/g.watt/HL/SMN-risk/secure_data/2024-08-20 Research Hodgkin cohort.xlsx")
+# }
+# #
+
+if (file.exists("U://HL/SMN-risk/secure_data/2024-12-12/ResearchDB_Export_from-Power-BI.csv")) {
   # tries Windows MDW version first
-dta0 <- readxl::read_xlsx("U://HL/SMN-risk/secure_data/2024-08-20 Research Hodgkin cohort.xlsx")
+dta0 <- read.csv("U://HL/SMN-risk/secure_data/2024-12-12/ResearchDB_Export_from-Power-BI.csv")
 } else {
   # then reads Mac Volumes
-  dta0 <- readxl::read_xlsx("/Volumes/g.watt/HL/SMN-risk/secure_data/2024-08-20 Research Hodgkin cohort.xlsx")
+  dta0 <- read.csv("/Volumes/g.watt/HL/SMN-risk/secure_data/2024-12-12/ResearchDB_Export_from-Power-BI.csv")
 }
+
+#out1 = setdiff(names(dta0), names(dta00)) # confirming differences in ResearchDB from PowerBI
+
+
 
 
 ```
@@ -50,7 +73,7 @@ smn_morphs = unique(c(unique(dta0$smn1_morph), unique(dta0$smn2_morph),
                     unique(dta0$smn3_morph), unique(dta0$smn4_morph),
                     unique(dta0$smn5_morph), unique(dta0$smn6_morph),
                     unique(dta0$smn7_morph)))
-write.csv(smn_morphs, "./output/intermediate-files/smn_morphs_list.csv", row.names = F)
+#write.csv(smn_morphs, "./output/intermediate-files/smn_morphs_list.csv", row.names = F)
 
 dta1 = dta0 %>% mutate(
   
@@ -65,33 +88,37 @@ dta1 = dta0 %>% mutate(
   
   # create date variables
   
-  dob, c(m_birth, y_birth), sep = "-", remove = F
+  dob, c(d_birth, m_birth, y_birth), sep = "-", remove = F
 ) %>% tidyr::unite(
-  ddx, c(m_diagnose, y_diagnose), sep = "-", remove = F
+  ddx, c(d_diagnose, m_diagnose, y_diagnose), sep = "-", remove = F
 ) %>% tidyr::unite(
-  d_smn1, c(m_smn1, y_smn1), sep = "-", remove = F
+  d0_smn1, c(d_smn1, m_smn1, y_smn1), sep = "-", remove = F
 ) %>% tidyr::unite(
-  d_smn2, c(m_smn2, y_smn2), sep = "-", remove = F
+  d0_smn2, c(d_smn2, m_smn2, y_smn2), sep = "-", remove = F
 ) %>% tidyr::unite(
-  d_smn3, c(m_smn3, y_smn3), sep = "-", remove = F
+  d0_smn3, c(d_smn3, m_smn3, y_smn3), sep = "-", remove = F
 ) %>% tidyr::unite(
-  d_smn4, c(m_smn4, y_smn4), sep = "-", remove = F
+  d0_smn4, c(d_smn4, m_smn4, y_smn4), sep = "-", remove = F
 ) %>% tidyr::unite(
-  d_smn5, c(m_smn5, y_smn5), sep = "-", remove = F
+  d0_smn5, c(d_smn5, m_smn5, y_smn5), sep = "-", remove = F
 ) %>% tidyr::unite(
-  d_smn6, c(m_smn6, y_smn6), sep = "-", remove = F
+  d0_smn6, c(d_smn6, m_smn6, y_smn6), sep = "-", remove = F
 ) %>% tidyr::unite(
-  d_smn7, c(m_smn7, y_smn7), sep = "-", remove = F
+  d0_smn7, c(d_smn7, m_smn7, y_smn7), sep = "-", remove = F
 ) %>% mutate(
-  dob = lubridate::parse_date_time(dob, "my"),
-  ddx = lubridate::parse_date_time(ddx, "my"),
-  d_smn1 = lubridate::parse_date_time(d_smn1, "my"),
-  d_smn2 = lubridate::parse_date_time(d_smn2, "my"),
-  d_smn3 = lubridate::parse_date_time(d_smn3, "my"),
-  d_smn4 = lubridate::parse_date_time(d_smn4, "my"),
-  d_smn5 = lubridate::parse_date_time(d_smn5, "my"),
-  d_smn6 = lubridate::parse_date_time(d_smn6, "my"),
-  d_smn7 = lubridate::parse_date_time(d_smn7, "my"),
+  dob = lubridate::parse_date_time(dob, "dmy"),
+  ddx = lubridate::parse_date_time(ddx, "dmy"),
+  date_smn1 = lubridate::parse_date_time(d0_smn1, "dmy"),
+  date_smn2 = lubridate::parse_date_time(d0_smn2, "dmy"),
+  date_smn3 = lubridate::parse_date_time(d0_smn3, "dmy"),
+  date_smn4 = lubridate::parse_date_time(d0_smn4, "dmy"),
+  date_smn5 = lubridate::parse_date_time(d0_smn5, "dmy"),
+  date_smn6 = lubridate::parse_date_time(d0_smn6, "dmy"),
+  date_smn7 = lubridate::parse_date_time(d0_smn7, "dmy"),
+  
+  # age
+  
+  age_dx = as.numeric(ddx - dob)/365.25,
   
   # indicator for malignant only
   
@@ -105,25 +132,25 @@ dta1 = dta0 %>% mutate(
   
   # date of first malignant smn
   
-  d_1st_inv = case_when(
-    smn1_mal == 1 ~ d_smn1,
-    smn1_mal == 0 & smn2_mal == 1 ~ d_smn2,
+  date_1st_inv = case_when(
+    smn1_mal == 1 ~ date_smn1,
+    smn1_mal == 0 & smn2_mal == 1 ~ date_smn2,
     smn1_mal == 0 & smn2_mal == 0 &
-      smn3_mal == 1 ~ d_smn3,
+      smn3_mal == 1 ~ date_smn3,
     smn1_mal == 0 & smn2_mal == 0 &
-      smn3_mal == 0 & smn4_mal ==1 ~ d_smn4,
-    smn1_mal == 0 & smn2_mal == 0 &
-      smn3_mal == 0 & smn4_mal == 0 &
-      smn5_mal == 1 ~ d_smn5,
+      smn3_mal == 0 & smn4_mal ==1 ~ date_smn4,
     smn1_mal == 0 & smn2_mal == 0 &
       smn3_mal == 0 & smn4_mal == 0 &
-      smn5_mal == 0 & smn6_mal == 1 ~ d_smn6,
+      smn5_mal == 1 ~ date_smn5,
+    smn1_mal == 0 & smn2_mal == 0 &
+      smn3_mal == 0 & smn4_mal == 0 &
+      smn5_mal == 0 & smn6_mal == 1 ~ date_smn6,
     smn1_mal == 0 & smn2_mal == 0 &
       smn3_mal == 0 & smn4_mal == 0 &
       smn5_mal == 0 & smn6_mal == 0 & 
-      smn7_mal == 1 ~ d_smn7
+      smn7_mal == 1 ~ date_smn7
   ),
-  
+
   # categories for SMN site
   
   # first, make numeric vars
@@ -132,6 +159,7 @@ dta1 = dta0 %>% mutate(
       .fns = ~as.numeric(stringr::str_remove(., "C")),
       .names = "{.col}_num"
       ),
+  # then label them
   across(
     .cols = contains("_num"),
     .fns = ~case_when(
@@ -158,16 +186,28 @@ dta1 = dta0 %>% mutate(
      .==73 | (.>=730 & .<740) ~ "Thyroid",
      (.>=740 & .<760) ~ "Other endocrine",
      # no cases for 762 769 (other undefined)
-     #*---------------
      #*
      #*
+     #*
+
+    ),
+    .names = "{col}_sitename"
+  ),
   
-     # morphology ## LATER
-    #  across(
-    # .cols = contains("_morph"),
-    # .fns = ~case_when(
-    )
-)
+  site_1st_inv = case_when(
+    is.na(date_1st_inv) ~ NA_character_,
+    date_1st_inv == date_smn1 ~ smn1_site_num_sitename,
+    date_1st_inv == date_smn2 ~ smn2_site_num_sitename,
+    date_1st_inv == date_smn3 ~ smn3_site_num_sitename,
+    date_1st_inv == date_smn4 ~ smn4_site_num_sitename,
+    date_1st_inv == date_smn5 ~ smn5_site_num_sitename,
+    date_1st_inv == date_smn6 ~ smn6_site_num_sitename,
+    date_1st_inv == date_smn7 ~ smn7_site_num_sitename
+  ),
+  
+  # primary cancer groupings
+  # - if needed, later
+  
 )
 
 # create time to event variables
@@ -176,20 +216,700 @@ dta2 = dta1 %>%
    # time to first INVASIVE cancer; do not censor at in situ; death as competing risk; censor at other
   
   tidyr::unite(
-  d_lc, c(m_lcontact, y_lcontact), sep = "-", remove = F
+  d0_lc, c(d_lcontact, m_lcontact, y_lcontact), sep = "-", remove = F
   ) %>% 
   tidyr::unite(
-  d_livedead, c(m_livedead, y_livedead), sep = "-", remove = F
+  d0_livedead, c(d_livedead, m_livedead, y_livedead), sep = "-", remove = F
+  ) %>% tidyr::unite(
+  d0_chemo_start, c(d_ctprim, m_ctprim, y_ctprim), sep = "-", remove = F
+  ) %>% tidyr::unite(
+  d0_rt_start, c(d_rtprim, m_rtprim, y_rtprim), sep = "-", remove = F
   ) %>% mutate(
-   d_lc = lubridate::parse_date_time(d_lc, "my"),
-   d_livedead = lubridate::parse_date_time(d_livedead, "my"),
+   date_lc = lubridate::parse_date_time(d0_lc, "dmy"),
+   date_livedead = lubridate::parse_date_time(d0_livedead, "dmy"),
+   date_chemo_start = lubridate::parse_date_time(d0_chemo_start, "dmy"),
+   date_rt_start = lubridate::parse_date_time(d0_rt_start, "dmy"),
    # find minimum of invasive, death, or lfy 
-   ftime_inv_sec = as.numeric(pmin(d_1st_inv, d_lc, d_livedead, na.rm = T) - ddx), # futime in secs
-   ftime_inv_yr = ftime_inv_sec/86400/365.25
+   # 1st, calcuate time to invasive SMN, if any
+   
+   rx_start = pmin(date_chemo_start, date_rt_start, na.rm = T), #520 missing both
+   # use ddx instead
+   fup_start = ddx %m+% years(5), # add 5 years to ddx to start follow-up
+   ftime_inv_smn = as.numeric(date_1st_inv - fup_start)/86400/365.25,
+    
+   # 2nd, calculate time to death, if deceased
+   
+     livedead_rec = case_when(
+     livedead == 0 ~ 0,
+     livedead == 1 ~ 1,
+     livedead == 2 ~ 1,
+     livedead == 99 ~ NA_real_
+   ),
+   
+   ftime_livedead = as.numeric(date_livedead - fup_start)/86400/365.25,
+   
+   # 3rd, calculate time to last contact
+   
+   ftime_lc = as.numeric(date_lc - fup_start)/86400/365.25,
+  
+   # 4th, bring it all together,
+   
+   cmpr_inv = case_when(
+     
+     # group A - both dead and SMN
+     !is.na(ftime_inv_smn) & livedead_rec == 1 & (ftime_inv_smn <= ftime_livedead) ~ 1, # event
+     !is.na(ftime_inv_smn) & livedead_rec == 1 & (ftime_inv_smn > ftime_livedead) ~ 2, # CR
+     
+     # group B - SMN but alive 
+     
+     !is.na(ftime_inv_smn) & livedead_rec == 0 ~ 1, # event
+     
+     # group C - SMN but vital status unknown
+     
+     !is.na(ftime_inv_smn) & is.na(livedead_rec) == 1 ~ 1, # event
+     
+     # group D - no SMN and dead
+     
+     is.na(ftime_inv_smn) & livedead_rec == 1 & date_livedead <= date_lc ~ 2, # CR
+     is.na(ftime_inv_smn) & livedead_rec == 1 & date_livedead > date_lc ~ 0, # censored before death
+     
+     # group E, no SMN, no death
+     
+     is.na(ftime_inv_smn) & livedead_rec == 0 ~ 0, # censor (at last follow-up; next var)
+     
+     # group F, both missing
+     
+     is.na(ftime_inv_smn) & is.na(livedead_rec) ~ NA_real_,
+
+   ),
+   
+   ftime_cmpr_inv = case_when(
+     cmpr_inv == 1 ~ ftime_inv_smn,
+     cmpr_inv == 2 ~ ftime_livedead,
+     cmpr_inv == 0 ~ pmin(ftime_livedead, ftime_lc)
+   ),
+     
    # exclude 139 that have missing l_contact
+   
+   ###
+   # create competing risks variable for time to first SMN (any)
+   ###
+   
+      # find minimum of SMN( invasive or in situ), death, or lfy 
+   # 1st, calcuate time to invasive SMN, if any
+   
+   ftime_any_smn = as.numeric(date_smn1 - fup_start)/86400/365.25,
+  
+   # 2nd, calculate time to death, if deceased
+
+   #ftime_vital = as.numeric(d_livedead - ddx)/86400/365.25,
+   
+   # 3rd, calculate time to last contact
+   
+   #ftime_lc = as.numeric(d_lc - ddx)/86400/365.25,
+  
+   # 4th, bring it all together,
+   
+   cmpr_any = case_when(
+     
+     # group A - both dead and SMN
+     !is.na(ftime_any_smn) & livedead_rec == 1 & (ftime_any_smn <= ftime_livedead) ~ 1, # event
+     !is.na(ftime_any_smn) & livedead_rec == 1 & (ftime_any_smn > ftime_livedead) ~ 2, # CR
+     
+     # group B - SMN but alive 
+     
+     !is.na(ftime_any_smn) & livedead_rec == 0 ~ 1, # event
+     
+     # group C - SMN but vital status unknown
+     
+     !is.na(ftime_any_smn) & is.na(livedead_rec) == 1 ~ 1, #event
+     
+     # group D - no SMN and dead
+     
+     is.na(ftime_any_smn) & livedead_rec == 1 & date_livedead <= date_lc ~ 2, # CR
+     is.na(ftime_any_smn) & livedead_rec == 1 & date_livedead > date_lc ~ 0, # censored before death
+     
+     # group E, no SMN, no death
+     
+     is.na(ftime_any_smn) & livedead_rec == 0 ~ 0, # censor (at last follow-up; next var)
+     
+     # group F, both missing
+     
+     is.na(ftime_any_smn) & is.na(livedead_rec) ~ NA_real_,
+   ),
+   
+   ftime_cmpr_any = case_when(
+     cmpr_any == 1 ~ ftime_any_smn,
+     cmpr_any == 2 ~ ftime_livedead,
+     cmpr_any == 0 ~ pmin(ftime_livedead, ftime_lc)
+     
+   ),
+   
+  ###
+   # create competing risks variable for time to FIRST BREAST CANCER
+   ###
+  
+  # do not censor at other invasive; simply adjust for in model
+   
+      # find minimum of breast cancer, death, or lfy 
+  
+  # indicator for breast or no
+  
+  breast_1st_inv_ind = case_when(
+    site_1st_inv == "Breast" ~ 1,
+    site_1st_inv != "Breast"  ~ 0 # includes na
+  ),
+  
+  date_breast_1st_inv = case_when(
+    breast_1st_inv_ind == 1 ~ date_1st_inv,
+    breast_1st_inv_ind != 0 ~ NA_Date_
+  ),
+  
+  # adjustment variable for nonbreast 
+  # analysis A: adjust for dx of other cancer
+  # analysi B: censor at diagnosis of non-breast inv.
+  
+  nonbreast_1st_inv_ind = case_when(
+    site_1st_inv != "Breast" & !is.na(site_1st_inv) ~ 1, # nonbreast
+    site_1st_inv == "Breast" | is.na(site_1st_inv)  ~ 0  # other, inc. na
+  ),
+  
+  ftime_breast = as.numeric(date_breast_1st_inv - fup_start)/86400/365.25,
+    
+   # 2nd, calculate time to death, if deceased
+   
+     livedead_rec = case_when(
+     livedead == 0 ~ 0,
+     livedead == 1 ~ 1,
+     livedead == 2 ~ 1,
+     livedead == 99 ~ NA_real_
+   ),
+   
+   ftime_livedead = as.numeric(date_livedead - fup_start)/86400/365.25,
+   
+   # 3rd, calculate time to last contact
+   
+   ftime_lc = as.numeric(date_lc - fup_start)/86400/365.25,
+  
+   # 4th, bring it all together,
+   
+   cmpr_breast = case_when(   # factor for censor/event/cr
+     
+     # group A - both dead and breast SMN
+     !is.na(ftime_breast) & livedead_rec == 1 & (ftime_breast <= ftime_livedead) ~ 1, # event
+     !is.na(ftime_breast) & livedead_rec == 1 & (ftime_breast > ftime_livedead) ~ 2, # CR
+     
+     # group B - SMN but alive 
+     
+     !is.na(ftime_breast) & livedead_rec == 0 ~ 1, # event
+     
+     # group C - SMN but vital status unknown
+     
+     !is.na(ftime_breast) & is.na(livedead_rec) == 1 ~ 1, # event
+     
+     # group D - no SMN and dead
+     
+     is.na(ftime_breast) & livedead_rec == 1 & date_livedead <= date_lc ~ 2, # CR
+     is.na(ftime_breast) & livedead_rec == 1 & date_livedead > date_lc ~ 0, # censored before death (last contact was before death)
+     
+     # group E, no SMN, no death
+     
+     is.na(ftime_breast) & livedead_rec == 0 ~ 0, # censor (at last follow-up; next var)
+     
+     # group F, both missing
+     
+     is.na(ftime_breast) & is.na(livedead_rec) ~ NA_real_,
+
+   ),
+   
+   ftime_cmpr_breast = case_when(
+     cmpr_inv == 1 ~ ftime_breast,
+     cmpr_inv == 2 ~ ftime_livedead,
+     cmpr_inv == 0 ~ pmin(ftime_livedead, ftime_lc)
+   ),
+
+  #####################
+  # Prostate
+  #####################
+  
+    # indicator for prostate or no
+  
+  prostate_1st_inv_ind = case_when(
+    site_1st_inv == "Prostate" ~ 1,
+    site_1st_inv != "Prostate" | is.na(site_1st_inv) ~ 0
+    ),
+  
+  # adjustment variable for nonbreast
+  
+  nonprostate_1st_inv_ind = case_when(
+    site_1st_inv != "Prostate" & !is.na(site_1st_inv) ~ 1, # nonprostate
+    site_1st_inv == "Prostate" | is.na(site_1st_inv)  ~ 0  # other, inc. na
+  ),
+  
+     ftime_prostate = as.numeric(date_1st_inv[prostate_1st_inv_ind == 1] - fup_start)/86400/365.25,
+    
+   # 2nd, calculate time to death, if deceased
+   
+     livedead_rec = case_when(
+     livedead == 0 ~ 0,
+     livedead == 1 ~ 1,
+     livedead == 2 ~ 1,
+     livedead == 99 ~ NA_real_
+   ),
+   
+   ftime_livedead = as.numeric(date_livedead - fup_start)/86400/365.25,
+   
+   # 3rd, calculate time to last contact
+   
+   ftime_lc = as.numeric(date_lc - fup_start)/86400/365.25,
+  
+   # 4th, bring it all together,
+   
+   cmpr_prostate = case_when(   # factor for censor/event/cr
+     
+     # group A - both dead and breast SMN
+     !is.na(ftime_prostate) & livedead_rec == 1 & (ftime_breast <= ftime_livedead) ~ 1, # event
+     !is.na(ftime_prostate) & livedead_rec == 1 & (ftime_breast > ftime_livedead) ~ 2, # CR
+     
+     # group B - SMN but alive 
+     
+     !is.na(ftime_prostate) & livedead_rec == 0 ~ 1, # event
+     
+     # group C - SMN but vital status unknown
+     
+     !is.na(ftime_prostate) & is.na(livedead_rec) == 1 ~ 1, # event
+     
+     # group D - no SMN and dead
+     
+     is.na(ftime_prostate) & livedead_rec == 1 & date_livedead <= date_lc ~ 2, # CR
+     is.na(ftime_prostate) & livedead_rec == 1 & date_livedead > date_lc ~ 0, # censored before death (last contact was before death)
+     
+     # group E, no SMN, no death
+     
+     is.na(ftime_prostate) & livedead_rec == 0 ~ 0, # censor (at last follow-up; next var)
+     
+     # group F, both missing
+     
+     is.na(ftime_prostate) & is.na(livedead_rec) ~ NA_real_,
+
+   ),
+   
+   ftime_cmpr_prostate = case_when(
+     cmpr_prostate == 1 ~ ftime_prostate,
+     cmpr_prostate == 2 ~ ftime_livedead,
+     cmpr_prostate == 0 ~ pmin(ftime_livedead, ftime_lc)
+   ),
+
+  
+      
+  # any smn
+  
+  any_smn = ifelse(!is.na(smn1_site),1,0),
+  
+  # any invasive smn
+  
+  any_inv_smn = ifelse(
+    smn1_mal == 1 | smn2_mal == 1 | smn3_mal == 1 | smn4_mal == 1 | smn5_mal == 1 |
+      smn6_mal == 1 | smn7_mal == 1, 1,0),
+
+   
+    # number of invasive and any SMNs
+
+      sumind_smn1 = ifelse(as.numeric(date_smn1)>=as.numeric(fup_start),1,0),
+      sumind_smn2 = ifelse(as.numeric(date_smn2)>=as.numeric(fup_start),1,0),
+      sumind_smn3 = ifelse(as.numeric(date_smn3)>=as.numeric(fup_start),1,0),
+      sumind_smn4 = ifelse(as.numeric(date_smn4)>=as.numeric(fup_start),1,0),
+      sumind_smn5 = ifelse(as.numeric(date_smn5)>=as.numeric(fup_start),1,0),
+      sumind_smn6 = ifelse(as.numeric(date_smn6)>=as.numeric(fup_start),1,0),
+      sumind_smn7 = ifelse(as.numeric(date_smn7)>=as.numeric(fup_start),1,0),
+    # indicator for any smn (invasive or not)
+    any_smn = ifelse(sumind_smn1 ==1 | sumind_smn2 ==1 | sumind_smn3 ==1 | sumind_smn4 ==1 | sumind_smn5 ==1 | sumind_smn6 ==1 | sumind_smn7 ==1,1,0 ),
+    # sum of smns
+    num_smn = rowSums(
+      cbind(sumind_smn1, sumind_smn2, sumind_smn3, sumind_smn4, sumind_smn5,
+            sumind_smn6, sumind_smn7),
+      na.rm = T
+    ),
+###  2024-11-13
+  # now do the same conditional on inv
+####  
+  sumind_inv_smn1 = ifelse(smn1_mal == 1 & (as.numeric(date_smn1)>=as.numeric(fup_start)),1,0),
+      sumind_inv_smn2 = ifelse(smn2_mal == 1 & (as.numeric(date_smn2)>=as.numeric(fup_start)),1,0),
+      sumind_inv_smn3 = ifelse(smn3_mal == 1 & (as.numeric(date_smn3)>=as.numeric(fup_start)),1,0),
+      sumind_inv_smn4 = ifelse(smn4_mal == 1 & (as.numeric(date_smn4)>=as.numeric(fup_start)),1,0),
+      sumind_inv_smn5 = ifelse(smn5_mal == 1 & (as.numeric(date_smn5)>=as.numeric(fup_start)),1,0),
+      sumind_inv_smn6 = ifelse(smn6_mal == 1 & (as.numeric(date_smn6)>=as.numeric(fup_start)),1,0),
+      sumind_inv_smn7 = ifelse(smn7_mal == 1 & (as.numeric(date_smn7)>=as.numeric(fup_start)),1,0),
+  # indicator for any invasive smn
+    any_inv_smn = ifelse(sumind_inv_smn1 ==1 | sumind_inv_smn2 ==1 | sumind_inv_smn3 ==1 | sumind_inv_smn4 ==1 | sumind_inv_smn5 ==1 | sumind_inv_smn6 ==1 | sumind_inv_smn7 ==1,1,0 ),
+  # sum of invasive smns
+    num_inv_smn = rowSums(
+      cbind(sumind_inv_smn1, sumind_inv_smn2, sumind_inv_smn3, sumind_inv_smn4, sumind_inv_smn5,
+            sumind_inv_smn6, sumind_inv_smn7),
+      na.rm = T
+    ),
+
+  # other variables
+  smk_evr_rec = case_when(
+    smoke_ever == 0 ~ 0,
+    smoke_ever == 1 ~ 1,
+    smoke_ever == 99 ~ NA_real_
+  )
 )
 
-# code to view pts with ftime <0. The first one is an error
-View(dta2 %>% filter(ftime_inv_yr < 0) %>% select(ResearchID, ftime_inv_yr, d_1st_inv, y_smn1, m_smn1, y_smn2, y_smn3, y_smn4, d_lc, m_lcontact, y_lcontact, d_livedead, m_livedead, y_livedead, ddx, m_diagnose, y_diagnose
-                                                  ))
+  
+
+#write.csv(neg_fut, "./output/to-check_smn_date.csv", quote = F, na = "", row.names = F)
+
+
+# subset to 1989 and later
+# filter out those that had smn before fup_start
+dta3 <- dta2 %>% filter(
+  y_diagnose >= 1989,
+  ftime_cmpr_inv >0,
+)
+
+cr1 = cmprsk::cuminc(dta3$ftime_cmpr_inv, dta3$cmpr_inv)
+
+bmi_miss = table(dta3$bmi_fup == 99)[2]
+
+
 ```
+
+
+# INTRODUCTION
+
+The purpose of this analysis report is to describe the incidence of subsequent malignant neoplasms (SMNs) in a cohort of Hodgkin Lymphoma survivors treated in 1989 or later. 
+
+# METHODS
+
+Follow-up time began 5 years after diagnosis month/years. In the primary analysis, follow-up time was calculated as the time from start of follow-up until the diagnosis of an invasive SMN, death, or end of follow-up. Death was considered a competing risk in calculation of cumulative incidence and multivariable hazard models.
+
+Secondary analysis: (1) for female participants, hazard of 1st invasive breast cancer with censoring at diagnosis of other invasive cancers; (2) for male participants, hazard of 1st invasive prostate cancer;... 
+
+Notes: BMI missing for `r bmi_miss` participants; not considered for remaining analysis.
+
+
+```{r}
+
+#| label: Description of study population
+
+d_desc = dta3 %>% mutate(
+  any_chemo = factor(
+    case_when(
+      ctprim == 1 | ctfup == 1 ~ 1, # coding for ctfup is 1/2/9 and ctprim is 0/1/9
+      ctprim == 0 & ctfup == 2 ~ 0,
+      ctprim == 9 & ctfup == 9 ~ NA_real_
+    ),
+    levels = 0:1,
+    labels = c("No","Yes"),
+  ),
+  anthra_rec = factor( # "any anthracyclines received within years"
+    case_when(
+    any_chemo == "No" ~ 0,
+    any_chemo == "Yes" & anthrac5 == 0 ~ 1,
+    any_chemo == "Yes" & anthrac5 == 1 ~  2,
+    ),
+    levels = 0:2,
+    labels = c("No Chemotherapy","Chemotherapy but no anthracyclines", "Anthracyclines")
+  ),
+  alk_rec = factor(
+    case_when(
+      any_chemo == "No" ~ 0,
+      any_chemo == "Yes" & alk5 == 0 ~ 1,
+      any_chemo == "Yes" & alk5 == 1 ~  2,
+      ),
+    levels = 0:2,
+    labels = c("No Chemotherapy","Chemotherapy but no alkylators", "Alkylators")
+  ),
+  ctype_combi = factor(
+    case_when(
+      any_chemo == "No" ~ 0,
+      any_chemo == "Yes" & anthra_rec %in% c("No Chemotherapy","Chemotherapy but no anthracyclines") &
+        alk_rec %in% c("No Chemotherapy","Chemotherapy but no alkylators") ~ 1, # neither,
+      any_chemo == "Yes" & anthra_rec %in% c("No Chemotherapy","Chemotherapy but no anthracyclines") & 
+        alk_rec == "Alkylators" ~ 2,
+      any_chemo == "Yes" & anthra_rec == "Anthracyclines" & 
+        alk_rec %in% c("No Chemotherapy","Chemotherapy but no alkylators") ~ 3,
+      any_chemo == "Yes" & anthra_rec == "Anthracyclines" & 
+        alk_rec %in% c("Alkylators") ~ 4,
+    ), levels = 0:4,
+    labels = c("No chemotherapy",
+               "Chemotherapy, but other classes",
+               "Alkylating agents but no Anthracyclines",
+               "Anthracyclines but no alkylating agents",
+               "Both anthracyclines and alkylating agents")
+  ),
+  any_rt = factor(
+    case_when(
+      rtprim == 1 | rtfup == 1 ~ 1,
+      rtprim == 0 & rtfup == 0 ~ 0,
+      rtprim == 9 & rtfup == 9 ~ NA_real_
+    ),
+    levels = 0:1,
+    labels = c("No","Yes")
+  ),
+  rx_combi = factor(
+    case_when(
+      any_chemo == "No" & any_rt == "No" ~ 0,
+      any_chemo == "Yes" & any_rt == "No" ~ 1,
+      any_chemo == "No" & any_rt == "Yes" ~ 2,
+      any_chemo == "Yes" & any_rt == "Yes" ~ 3,
+      is.na(any_chemo) | is.na(any_rt) ~ NA_real_
+    ),
+    levels = 0:3,
+    labels = c(
+      "Neither Chemotherapy nor RT",
+      "Only chemotherapy",
+      "Only RT",
+      "Both chemotherapy and RT"
+    )
+  ),
+  
+  sex_rec = factor(
+    case_when(
+      sex == 0 ~ 0,
+      sex == 1 ~ 1,
+      sex == 2 ~ 2,
+      sex == 99 ~ NA_real_
+    ),
+    levels = 0:2,
+    labels = c("Male", "Female", "Intersex/other")
+  ),
+  
+  # treatment period
+  
+  y_dx_cat = factor(
+    case_when(
+      y_diagnose %in% c(1989:1994) ~ 1,
+      y_diagnose %in% c(1995:1999) ~ 2,
+      y_diagnose %in% c(2000:2004) ~ 3,
+      y_diagnose %in% c(2005:2013) ~ 4
+    ),
+    levels = 1:4,
+    labels= c("1989-1994","1995-1999","2000-2004","2005-2013")
+  ),
+  age_dx_cat = factor(
+    Hmisc::cut2(age_dx,
+                cuts = c(0,20,30,40,50, 100)
+                ),
+    labels = c("<20", "20 to <30","30 to <40", "40 to <50","50+")
+  ),
+  tot_fuptime_cat = factor(
+    Hmisc::cut2(ftime_cmpr_inv,
+                  cuts = c(0,10,20,50)),
+    labels = c("<10", "10 to <20","20+")
+    ),
+  
+  smk_evr_rec = factor(
+    smk_evr_rec,
+    levels = 0:1,
+    labels = c("No","Yes") 
+  )
+
+  
+)
+
+# labs_desc = list(
+#   age_dx_cat,
+#   y_dx_cat,
+#   sex_rec,
+#   any_chemo,
+#   anth_rec,
+#   alk_rec,
+#   ctype_combi,
+#   any_rt,
+#   rx_combi,
+#   tot_fuptime_cat,
+#   num_inv_smn,
+#   num_smn
+# )
+
+
+desc_labels = list(
+  age_dx_cat ~ "Age at HL diagnosis",
+  y_dx_cat ~ "Year of HL diagnosis",
+  tot_fuptime_cat ~ "Total follow-up time, years",
+  sex_rec ~ "Sex",
+  smk_evr_rec = "Ever smoked",
+  ctype_combi ~ "Chemotherapy/type received",
+  alk_rec ~ "Alkylating agents received",
+  anthra_rec ~ "Anthracyclines received",
+  any_rt ~ "Any RT received for HL",
+  rx_combi ~ "Treatment combination for HL",
+  num_inv_smn ~ "Total number of invasive SMNs",
+  num_smn ~ "Total number of subsequent cancers"
+)
+
+t_desc = d_desc %>% select(
+  age_dx_cat,
+  y_dx_cat,
+  tot_fuptime_cat, 
+  sex_rec,
+  smk_evr_rec,
+  rx_combi,
+  alk_rec,
+  anthra_rec,
+  ctype_combi,
+  any_rt,
+  num_inv_smn,
+  num_smn
+) %>% gtsummary::tbl_summary(
+  type = c("any_rt", "smk_evr_rec") ~ "categorical",
+  label= desc_labels
+  ) %>% modify_footnote(
+    everything() ~ NA, abbreviation = F
+  ) %>% bold_labels()
+
+
+```
+
+**Table 1**, below, displays the characteristics of the study population. Diagnosis years ranged from 1989 through 2013, with 48% treated in 2000 or later. Diagnosis age ranged from 4 to 79, with median follow-up time of 12 years (range 0.1-28) conditional on survival to 5 years after diagnosis. Sixty-seven percent received both RT and chemotherapy for primary treatment; for those receiving chemotherapy, 70% received both anthracyclines and alkylators.Sixteen percent received at least one invasive SMN diagnosis; 3% had more than 1 invasive SMN. 
+
+```{r}
+
+#| label: render-desc-tbl
+
+t_desc %>% as_flex_table(
+) %>% add_header_lines(
+  "Table 1. Descriptive statistics of Hodgkin Lymphoma survivors diagnosed 1989-2013"
+) %>% add_footer_lines(
+  "Abbreviations. HL, Hodgkin Lymphoma; SMN, subsequent malignant neoplasm; RT, radiation therapy"
+) %>% footnote(
+  part = "body",
+  i = 12, j = 1,
+  value = as_paragraph(c(
+    "Follow-up time was calculated from 5 years after diagnosis until diagnosis of an invasive SMN, death, or end of follow-up")),
+    ref_symbols = c("1")
+  ) %>% bold(
+    i = 1, part = "header"
+  ) %>% flextable::autofit()
+
+
+
+
+```
+
+```{r}
+#| label: rx-yr-crosstab
+
+cross_labels = list(
+  rx_combi ~ "Treatment combination",
+  y_dx_cat ~ "Year of diagnosis",
+  ctype_combi ~ "Chemotherapy receipt and type"
+)
+
+cross1 = d_desc %>% gtsummary::tbl_cross(
+  row = rx_combi,
+  col = y_dx_cat,
+  percent = "column",
+  label = list(
+    rx_combi ~ "Treatment combination",
+    y_dx_cat ~ "Year of diagnosis")
+)
+
+cross2 = d_desc %>% gtsummary::tbl_cross(
+  row = ctype_combi,
+  col = y_dx_cat,
+  percent = "column",
+  label = list(
+  y_dx_cat ~ "Year of diagnosis",
+  ctype_combi ~ "Chemotherapy classes"
+)
+)
+
+out1 = tbl_stack(
+  list(
+    cross1, cross2
+  )
+)  %>% bold_labels()
+
+```
+
+**Table 2** displays the distribution of treatment combinations across years of diagnosis. RT was excluded from 20% of treatment plans overall, ranging from 11% in 1989-1994 to 30% in 2005-2013. Combined anthracycline+alkylator agent therapy was given in 55% of treatment plans from 1989-1994 and in 85% of plans in 2005-2013.
+
+```{r}
+
+#| label: render-cross
+
+out1 %>% as_flex_table(
+) %>% add_header_lines(
+  "Table 2. Treatment types by year of diagnosis"
+) %>% footnote(
+  i = 10, j = 1,
+  value = as_paragraph(
+    "Chemotherapy received but not classified as anthracycline-based or alkylator-based"
+  )
+) %>% bold(
+  part = "header"
+) %>% flextable::autofit()
+
+```
+
+\newpage
+
+
+```{r}
+
+
+#| label: cuminc-1st-inv
+
+# filter to invasive smnss
+
+cuminc_1st_inv = tidycmprsk::cuminc(Surv(ftime_cmpr_inv, as.factor(cmpr_inv)) ~ 1, data = d_desc)
+
+p1 = cuminc_1st_inv %>% ggcuminc(
+) + add_confidence_interval(
+) + add_risktable(
+) + scale_ggsurvfit(
+  y_scales = list(
+    breaks = seq(0,1,by = .1),
+    limits = c(0,1)
+  )
+) + labs(
+  x = "Follow-up time, years",
+  y = "Cumulative incidence",
+  title = "Overall"
+) + theme(
+  legend.position = "right"
+)
+
+cuminc_1st_inv_ydx = tidycmprsk::cuminc(Surv(ftime_cmpr_inv, as.factor(cmpr_inv)) ~ y_dx_cat, data = d_desc)
+
+# manual modification removing outliers (due to calculation of pt with months/years)
+cuminc_1st_inv_ydx$tidy = cuminc_1st_inv_ydx$tidy[cuminc_1st_inv_ydx$tidy$estimate < 0.5,]
+
+p2 = cuminc_1st_inv_ydx %>% ggcuminc(
+) + add_confidence_interval(
+) + add_risktable(
+) + scale_ggsurvfit(
+  y_scales = list(
+    breaks = seq(0,1,by = .1),
+    limits = c(0,1)
+  )
+) + labs(
+  x = "Follow-up time, years",
+  y = "Cumulative incidence",
+  title = "By diagnosis year"
+) + theme(
+  legend.position = "right"
+)
+
+
+cuminc_est = tbl_cuminc(cuminc_1st_inv)
+
+```
+
+*Figure 1* displays the cumulative incidence curves for any invasive SMN accounting for death as a competing risk. The cumulative incidence of any invasive SMN was `{r} cuminc_est$table_body$stat_1` at 10 years and `{r} cuminc_est$table_body$stat_2` at 20 years (Figure 1A). There was no statistical evidence of changes in SMN incidence across diagnosis years (p=0.28).
+
+```{r, fig.height=8}
+
+
+ggpubr::ggarrange(p1,p2,
+                  nrow = 2,
+                  common.legend = T,
+                  labels = c("A","B"),
+                  legend = "bottom"                 )
+
+```
+
