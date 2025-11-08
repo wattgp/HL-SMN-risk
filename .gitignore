@@ -3,6 +3,7 @@
 .RData
 .Ruserdata
 
+
 *.xl*
 *.Rdata
 *.Rds
@@ -15,4 +16,4 @@
 *.dta
 *.log
 *.tmp
-/.quarto/
+
