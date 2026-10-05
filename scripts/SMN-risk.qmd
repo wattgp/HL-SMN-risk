@@ -1,0 +1,2008 @@
+---
+title: "SMN-risk"
+format: "html"
+author: "Gordie Watt"
+execute:
+  echo: false
+  error: false
+  message: false
+---
+
+```{r}
+
+#| label: setup
+
+library(tidyverse)
+library(janitor)
+library(naniar)
+library(lubridate)
+library(stringr)
+library(forcats)
+library(skimr)
+library(arrow)
+library(tidycmprsk)
+library(ggsurvfit)
+library(ggpubr)
+library(paletteer)
+
+
+here::i_am("scripts/SMN-risk.qmd")
+library(here)
+
+```
+
+```{r}
+
+#| label: read-data
+
+
+dta0 = readr::read_csv(
+  here("secure_data","2024-12-12","ResearchDB_Export_from-Power-BI.csv"),
+  locale = locale(decimal_mark = ".", grouping_mark = ","),
+  col_names = T
+) 
+
+#readr::problems(dta1) # free text guessed as logical
+
+dta1 = dta0 %>% mutate_if(
+  is.logical, as.character
+)
+
+#readr::problems(dta1) # no more problems
+
+#skimr::skim(dta1)
+
+# 97 are missing d_livedead
+
+#naniar::miss_var_summary(dta1)
+
+# 100% missing for c6ctprim (6th cycle primary chemo), etc.
+
+#janitor::get_dupes(dta1, ResearchID) # none
+
+# normalize headers
+
+basic_input_clean = dta1 %>% 
+  janitor::clean_names() %>% 
+  mutate(
+#    across(                   # 777 indicates "other" chemotherapy and 
+#      where(is.character),    # must be dealt with separately
+#      ~ na_if(., c("777")
+#      )
+#    ),
+    across(
+      where(is.character),
+      ~ na_if(., "888")
+    ),
+      across(
+      where(is.character),
+      ~ na_if(., "999")
+    ),
+      across(
+      where(is.character),
+      ~ na_if(., "")
+    ),
+      across(
+      where(is.double),
+      ~ na_if(., 777)
+        ),
+      across(
+      where(is.double),
+      ~ na_if(., 888)
+      ),
+      across(
+      where(is.double),
+      ~ na_if(., 99)
+      ),
+      across(
+      where(is.double),
+      ~ na_if(., 999)
+      ),
+          across(
+      where(is.double),
+      ~ na_if(., 9999)
+      ),
+      across(
+      where(is.double),
+      ~ na_if(., 9998)
+      )
+    
+    )## make sure the chemotherapy variables are the correct class
+
+
+ View(basic_input_clean[,grepl("/^777$/",basic_input_clean)]) # none left
+# View(dta2[,grepl("/^888$/",dta2)]) # none left
+# View(dta2[,grepl("/^999$/",dta2)]) # none left
+#View(dta2[,grepl(" ",dta2)]) # none left
+
+saveRDS(basic_input_clean, here::here("secure_data","intermediate","full_dataset_basic_cleaning.Rds"
+))
+
+```
+
+```{r}
+
+#| label: prepare-outcome-variables
+
+# dictionary for 2nd cancer sites
+
+smn_morphs = unique(c(unique(dta0$smn1_morph), unique(dta0$smn2_morph),
+                    unique(dta0$smn3_morph), unique(dta0$smn4_morph),
+                    unique(dta0$smn5_morph), unique(dta0$smn6_morph),
+                    unique(dta0$smn7_morph)))
+#write.csv(smn_morphs, here("output","intermediate-files","smn_morphs_list.csv"), row.names = F)
+
+dta3 = basic_input_clean %>% mutate(
+  
+  # recode y_livedead 9999 and 9998 as na
+  # note - y_lcontact is the most recent date to which SMN would be known. So
+  # censoring should happen no later than that date. 
+  
+  ) %>% tidyr::unite(
+  
+  # create date variables
+  
+  dob, c(d_birth, m_birth, y_birth), sep = "-", remove = F
+) %>% tidyr::unite(
+  ddx, c(d_diagnose, m_diagnose, y_diagnose), sep = "-", remove = F
+) %>% tidyr::unite(
+  d0_smn1, c(d_smn1, m_smn1, y_smn1), sep = "-", remove = F
+) %>% tidyr::unite(
+  d0_smn2, c(d_smn2, m_smn2, y_smn2), sep = "-", remove = F
+) %>% tidyr::unite(
+  d0_smn3, c(d_smn3, m_smn3, y_smn3), sep = "-", remove = F
+) %>% tidyr::unite(
+  d0_smn4, c(d_smn4, m_smn4, y_smn4), sep = "-", remove = F
+) %>% tidyr::unite(
+  d0_smn5, c(d_smn5, m_smn5, y_smn5), sep = "-", remove = F
+) %>% tidyr::unite(
+  d0_smn6, c(d_smn6, m_smn6, y_smn6), sep = "-", remove = F
+) %>% tidyr::unite(
+  d0_smn7, c(d_smn7, m_smn7, y_smn7), sep = "-", remove = F
+) %>% mutate(
+  dob = lubridate::parse_date_time(dob, "dmy"),
+  ddx = lubridate::parse_date_time(ddx, "dmy"),
+  date_smn1 = lubridate::parse_date_time(d0_smn1, "dmy"),
+  date_smn2 = lubridate::parse_date_time(d0_smn2, "dmy"),
+  date_smn3 = lubridate::parse_date_time(d0_smn3, "dmy"),
+  date_smn4 = lubridate::parse_date_time(d0_smn4, "dmy"),
+  date_smn5 = lubridate::parse_date_time(d0_smn5, "dmy"),
+  date_smn6 = lubridate::parse_date_time(d0_smn6, "dmy"),
+  date_smn7 = lubridate::parse_date_time(d0_smn7, "dmy"),
+  
+  # age
+  
+  age_dx = as.numeric(ddx - dob)/365.25,
+  
+  # indicator for malignant only
+  
+  smn1_mal = ifelse(smn1_behav %in% c(3,6,9),1,0),
+  smn2_mal = ifelse(smn2_behav %in% c(3,6,9),1,0), 
+  smn3_mal = ifelse(smn3_behav %in% c(3,6,9),1,0),
+  smn4_mal = ifelse(smn4_behav %in% c(3,6,9),1,0),
+  smn5_mal = ifelse(smn5_behav %in% c(3,6,9),1,0),
+  smn6_mal = ifelse(smn6_behav %in% c(3,6,9),1,0),
+  smn7_mal = ifelse(smn7_behav %in% c(3,6,9),1,0),
+  
+  # date of first malignant smn
+  
+  date_1st_inv = case_when(
+    smn1_mal == 1 ~ date_smn1,
+    smn1_mal == 0 & smn2_mal == 1 ~ date_smn2,
+    smn1_mal == 0 & smn2_mal == 0 &
+      smn3_mal == 1 ~ date_smn3,
+    smn1_mal == 0 & smn2_mal == 0 &
+      smn3_mal == 0 & smn4_mal ==1 ~ date_smn4,
+    smn1_mal == 0 & smn2_mal == 0 &
+      smn3_mal == 0 & smn4_mal == 0 &
+      smn5_mal == 1 ~ date_smn5,
+    smn1_mal == 0 & smn2_mal == 0 &
+      smn3_mal == 0 & smn4_mal == 0 &
+      smn5_mal == 0 & smn6_mal == 1 ~ date_smn6,
+    smn1_mal == 0 & smn2_mal == 0 &
+      smn3_mal == 0 & smn4_mal == 0 &
+      smn5_mal == 0 & smn6_mal == 0 & 
+      smn7_mal == 1 ~ date_smn7
+  ),
+
+  # categories for SMN site
+  
+  # first, make numeric vars
+  across(
+      .cols = contains("_site"),
+      .fns = ~as.numeric(stringr::str_remove(., "C")),
+      .names = "{.col}_num"
+      ),
+  # then label them
+  across(
+    .cols = contains("_num"),
+    .fns = ~case_when(
+     (. < 150) | (. >= 300 & . <338) | (.==760) ~ "Head and neck",
+     .==15 | (. >= 150 & . <160) | (. == 339) ~ "Esophagus/Trachea",
+     (. >= 160 & . <220) | (.>= 480 & .<490) | .==762 ~ "Gastrointestinal tract",
+     .==22 | (. >= 220 & . <250) ~ "Liver/IHD/Biliary tract",
+     .==34 | (. >= 340 & . <349) ~ "Lung/Bronchus",
+     (. >= 379 & . <399) | .==761 ~ "Other intrathoracic",
+     (. >= 410 & .<419) | (. >= 490 & . < 500) ~ "Sarcoma",
+     .==77 | (.>=770 & .<800) ~ "Lymphoma",
+     .==42 | (. >= 420 & .<424) ~ "Hematological",
+     (.==421) ~ "Hodgkin",
+     .==44 | (.>=440 & .< 470) ~ "Skin",
+     .==72 | (.>=470 & .<479) | (.>=690 & .<=729)~ "Brain and Nervous System", # including 1 choroid (eye) cancer
+     .==50 | (.>=500 & .<510) ~ "Breast",
+     (.>=510 & .<=529) | (.==579)~ "Vulva/vagina",
+     .==53 | (.>=530 & .< 540) ~ "Cervix",
+     .==54 | (.>=540 & .<560) ~ "Uterus",
+     (.>=569 & .<=570) | (.==589) ~ "Ovary/Fallopian tube", # note includes 1 placenta
+     .==619 ~ "Prostate",
+     .==62 | (.>=60 & .<619) | (.>=620 & .<639) ~ "Other male genital",
+     .>640 & .<690 ~ "Urinary tract", # including kidney
+     .==73 | (.>=730 & .<740) ~ "Thyroid",
+     (.>=740 & .<760) ~ "Other endocrine",
+     # no cases for 762 769 (other undefined)
+     #*
+     #*
+     #*
+
+    ),
+    .names = "{col}_sitename"
+  ),
+  
+  site_1st_inv = case_when(
+    is.na(date_1st_inv) ~ NA_character_,
+    date_1st_inv == date_smn1 ~ smn1_site_num_sitename,
+    date_1st_inv == date_smn2 ~ smn2_site_num_sitename,
+    date_1st_inv == date_smn3 ~ smn3_site_num_sitename,
+    date_1st_inv == date_smn4 ~ smn4_site_num_sitename,
+    date_1st_inv == date_smn5 ~ smn5_site_num_sitename,
+    date_1st_inv == date_smn6 ~ smn6_site_num_sitename,
+    date_1st_inv == date_smn7 ~ smn7_site_num_sitename
+  ),
+  
+  # primary cancer groupings
+  # - if needed, later
+  
+)
+
+# create time to event variables
+
+dta4 = dta3 %>% 
+  # Note 1: time to first INVASIVE cancer; do not censor at in situ; death as competing risk; censor at other
+  # Note 2: Follow-up time *starts* 5 years after diagnosis
+  
+  
+  tidyr::unite(
+  d0_lc, c(d_lcontact, m_lcontact, y_lcontact), sep = "-", remove = F
+  ) %>% 
+  tidyr::unite(
+  d0_livedead, c(d_livedead, m_livedead, y_livedead), sep = "-", remove = F
+  ) %>% tidyr::unite(
+  d0_chemo_start, c(d_ctprim, m_ctprim, y_ctprim), sep = "-", remove = F
+  ) %>% tidyr::unite(
+  d0_rt_start, c(d_rtprim, m_rtprim, y_rtprim), sep = "-", remove = F
+  ) %>% mutate(
+   date_lc = lubridate::parse_date_time(d0_lc, "dmy"),
+   date_livedead = lubridate::parse_date_time(d0_livedead, "dmy"),
+   date_chemo_start = lubridate::parse_date_time(d0_chemo_start, "dmy"),
+   date_rt_start = lubridate::parse_date_time(d0_rt_start, "dmy"),
+   # find minimum of invasive, death, or lfy 
+   # 1st, calcuate time to invasive SMN, if any
+   
+   rx_start = pmin(date_chemo_start, date_rt_start, na.rm = T), #520 missing both
+   # use ddx instead
+   
+   fup_start = ddx %m+% years(5), # NOTE!!! add 5 years to ddx to start follow-up
+   
+   ftime_inv_smn = as.numeric(date_1st_inv - fup_start)/86400/365.25, # ouptut in seconds so divid by secs in day then days in year
+    # note: NA if no SMN
+
+   # latest follow-up Date
+   
+   date_max_fu = pmax(date_livedead, date_lc, date_1st_inv, na.rm = T),
+   
+   # 2nd, calculate time to death, if deceased
+   
+     livedead_rec = case_when(
+     livedead == 0 ~ 0,
+     livedead == 1 ~ 1,
+     livedead == 2 ~ 1,     # recoded `moved abroad' as `alive'
+     livedead == 99 ~ NA_real_
+   ),
+  
+   ftime_livedead = as.numeric(date_livedead - fup_start)/365.25/86400, # output in seconds so divide by days in year and seconds in day
+   
+   # 3rd, calculate time to last contact
+   
+   ftime_lc = as.numeric(date_lc - fup_start)/365.25/86400,
+  
+   # calculate longest follow-up time (really only for tbl1)
+   
+   ftime_max = as.numeric(date_max_fu - fup_start)/365.25/86400,
+   
+   # 4th, bring it all together,
+   
+   cmpr_inv = case_when(
+     
+     # group A - both dead and SMN
+     
+     !is.na(ftime_inv_smn) & livedead_rec == 1 & (ftime_inv_smn <= ftime_livedead) ~ 1, # event
+     !is.na(ftime_inv_smn) & livedead_rec == 1 & (ftime_inv_smn > ftime_livedead) ~ 2, # CR
+     
+     # group B - SMN but alive 
+     
+     !is.na(ftime_inv_smn) & livedead_rec == 0 ~ 1, # event
+     
+     # group C - SMN but vital status unknown
+     
+     !is.na(ftime_inv_smn) & is.na(livedead_rec) == 1 ~ 1, # event
+     
+     # group D - no SMN and dead
+     
+     is.na(ftime_inv_smn) & livedead_rec == 1 & date_livedead <= date_lc ~ 2, # CR
+     is.na(ftime_inv_smn) & livedead_rec == 1 & date_livedead > date_lc ~ 0, # censored before death
+     
+     # group E, no SMN, no death
+     
+     is.na(ftime_inv_smn) & livedead_rec == 0 ~ 0, # censor (at last follow-up; next var)
+     
+     # group F, both missing
+     
+     is.na(ftime_inv_smn) & is.na(livedead_rec) ~ NA_real_,
+
+   ),
+   
+   ftime_cmpr_inv = case_when(
+     cmpr_inv == 1 ~ ftime_inv_smn,
+     cmpr_inv == 2 ~ ftime_livedead,
+     cmpr_inv == 0 ~ pmin(ftime_livedead, ftime_lc)
+   ),
+     
+   # exclude 139 that have missing l_contact
+   
+   ###
+   # create competing risks variable for time to first SMN (any)
+   ###
+   
+      # find minimum of SMN( invasive or in situ), death, or lfy 
+   # 1st, calcuate time to invasive SMN, if any
+   
+   ftime_any_smn = as.numeric(date_smn1 - fup_start)/86400/365.25,
+  
+   # 2nd, calculate time to death, if deceased
+
+   #ftime_vital = as.numeric(d_livedead - ddx)/86400/365.25,
+   
+   # 3rd, calculate time to last contact
+   
+   #ftime_lc = as.numeric(d_lc - ddx)/86400/365.25,
+  
+   # 4th, bring it all together,
+   
+   cmpr_any = case_when(
+     
+     # group A - both dead and SMN
+     !is.na(ftime_any_smn) & livedead_rec == 1 & (ftime_any_smn <= ftime_livedead) ~ 1, # event
+     !is.na(ftime_any_smn) & livedead_rec == 1 & (ftime_any_smn > ftime_livedead) ~ 2, # CR
+     
+     # group B - SMN but alive 
+     
+     !is.na(ftime_any_smn) & livedead_rec == 0 ~ 1, # event
+     
+     # group C - SMN but vital status unknown
+     
+     !is.na(ftime_any_smn) & is.na(livedead_rec) == 1 ~ 1, #event
+     
+     # group D - no SMN and dead
+     
+     is.na(ftime_any_smn) & livedead_rec == 1 & date_livedead <= date_lc ~ 2, # CR
+     is.na(ftime_any_smn) & livedead_rec == 1 & date_livedead > date_lc ~ 0, # censored before death
+     
+     # group E, no SMN, no death
+     
+     is.na(ftime_any_smn) & livedead_rec == 0 ~ 0, # censor (at last follow-up; next var)
+     
+     # group F, both missing
+     
+     is.na(ftime_any_smn) & is.na(livedead_rec) ~ NA_real_,
+   ),
+   
+   ftime_cmpr_any = case_when(
+     cmpr_any == 1 ~ ftime_any_smn,
+     cmpr_any == 2 ~ ftime_livedead,
+     cmpr_any == 0 ~ pmin(ftime_livedead, ftime_lc)
+     
+   ),
+   
+  ###
+   # create competing risks variable for time to FIRST BREAST CANCER
+   ###
+  
+  # do not censor at other invasive; simply adjust for in model
+   
+      # find minimum of breast cancer, death, or lfy 
+  
+  # indicator for breast or no
+  
+  breast_1st_inv_ind = case_when(
+    site_1st_inv == "Breast" ~ 1,
+    site_1st_inv != "Breast"  ~ 0 # includes na
+  ),
+  
+  date_breast_1st_inv = case_when(
+    breast_1st_inv_ind == 1 ~ date_1st_inv,
+    breast_1st_inv_ind != 0 ~ NA_POSIXct_
+  ),
+  
+  # adjustment variable for nonbreast 
+  # analysis A: adjust for dx of other cancer
+  # analysis B: censor at diagnosis of non-breast inv. (primary analysis)
+  
+  nonbreast_1st_inv_ind = case_when(
+    site_1st_inv != "Breast" & !is.na(site_1st_inv) ~ 1, # nonbreast
+    site_1st_inv == "Breast" | is.na(site_1st_inv)  ~ 0  # other, inc. na
+  ),
+  
+  ftime_breast = as.numeric(date_breast_1st_inv - fup_start)/365.25,
+    
+   # 2nd, calculate time to death, if deceased
+   
+     livedead_rec = case_when(
+     livedead == 0 ~ 0,
+     livedead == 1 ~ 1,
+     livedead == 2 ~ 1,
+     livedead == 99 ~ NA_real_
+   ),
+   
+   # 3rd, calculate time to last contact
+   
+   # 4th, bring it all together,
+   
+   cmpr_breast = case_when(   # factor for censor/event/cr
+     
+     # group A - both dead and breast SMN
+     !is.na(ftime_breast) & livedead_rec == 1 & (ftime_breast <= ftime_livedead) ~ 1, # event
+     !is.na(ftime_breast) & livedead_rec == 1 & (ftime_breast > ftime_livedead) ~ 2, # CR
+     
+     # group B - SMN but alive 
+     
+     !is.na(ftime_breast) & livedead_rec == 0 ~ 1, # event
+     
+     # group C - SMN but vital status unknown
+     
+     !is.na(ftime_breast) & is.na(livedead_rec) == 1 ~ 1, # event
+     
+     # group D - no SMN and dead
+     
+     is.na(ftime_breast) & livedead_rec == 1 & date_livedead <= date_lc ~ 2, # CR
+     is.na(ftime_breast) & livedead_rec == 1 & date_livedead > date_lc ~ 0, # censored before death (last contact was before death)
+     
+     # group E, no SMN, no death
+     
+     is.na(ftime_breast) & livedead_rec == 0 ~ 0, # censor (at last follow-up; next var)
+     
+     # group F, both missing
+     
+     is.na(ftime_breast) & is.na(livedead_rec) ~ NA_real_,
+
+   ),
+   
+   ftime_cmpr_breast = case_when(
+     cmpr_breast == 1 ~ ftime_breast,
+     cmpr_breast == 2 ~ ftime_livedead,
+     cmpr_breast == 0 ~ pmin(ftime_livedead, ftime_lc)
+   ),
+
+  ##### Prostate
+
+    # indicator for prostate or no
+  
+    prostate_1st_inv_ind = case_when(
+    site_1st_inv == "Prostate" ~ 1,
+    site_1st_inv != "Prostate" | is.na(site_1st_inv) ~ 0
+    ),
+  
+    date_prostate_1st_inv = case_when(
+    prostate_1st_inv_ind == 1 ~ date_1st_inv,
+    prostate_1st_inv_ind != 0 ~ NA_Date_
+  ),
+  
+  # adjustment variable for nonbreast
+  
+  nonprostate_1st_inv_ind = case_when(
+    site_1st_inv != "Prostate" & !is.na(site_1st_inv) ~ 1, # nonprostate
+    site_1st_inv == "Prostate" | is.na(site_1st_inv)  ~ 0  # other, inc. na
+  ),
+  
+  ftime_prostate = as.numeric(date_prostate_1st_inv - fup_start)/86400/365.25,
+    
+   # 2nd, calculate time to death, if deceased
+   
+   # 3rd, calculate time to last contact
+   
+
+   # 4th, bring it all together,
+   
+   cmpr_prostate = case_when(   # factor for censor/event/cr
+     
+     # group A - both dead and breast SMN
+     !is.na(ftime_prostate) & livedead_rec == 1 & (ftime_prostate <= ftime_livedead) ~ 1, # event
+     !is.na(ftime_prostate) & livedead_rec == 1 & (ftime_prostate > ftime_livedead) ~ 2, # CR
+     
+     # group B - SMN but alive 
+     
+     !is.na(ftime_prostate) & livedead_rec == 0 ~ 1, # event
+     
+     # group C - SMN but vital status unknown
+     
+     !is.na(ftime_prostate) & is.na(livedead_rec) == 1 ~ 1, # event
+     
+     # group D - no SMN and dead
+     
+     is.na(ftime_prostate) & livedead_rec == 1 & date_livedead <= date_lc ~ 2, # CR
+     is.na(ftime_prostate) & livedead_rec == 1 & date_livedead > date_lc ~ 0, # censored before death (last contact was before death)
+     
+     # group E, no SMN, no death
+     
+     is.na(ftime_prostate) & livedead_rec == 0 ~ 0, # censor (at last follow-up; next var)
+     
+     # group F, both missing
+     
+     is.na(ftime_prostate) & is.na(livedead_rec) ~ NA_real_,
+
+   ),
+   
+   ftime_cmpr_prostate = case_when(
+     cmpr_prostate == 1 ~ ftime_prostate,
+     cmpr_prostate == 2 ~ ftime_livedead,
+     cmpr_prostate == 0 ~ pmin(ftime_livedead, ftime_lc)
+   ),
+
+  
+      
+  # any smn
+  
+  any_smn = ifelse(!is.na(smn1_site),1,0),
+  
+  # any invasive smn
+  
+  any_inv_smn = ifelse(
+    smn1_mal == 1 | smn2_mal == 1 | smn3_mal == 1 | smn4_mal == 1 | smn5_mal == 1 |
+      smn6_mal == 1 | smn7_mal == 1, 1,0),
+
+   
+    # number of invasive and any SMNs
+
+      sumind_smn1 = ifelse(as.numeric(date_smn1)>=as.numeric(fup_start),1,0),
+      sumind_smn2 = ifelse(as.numeric(date_smn2)>=as.numeric(fup_start),1,0),
+      sumind_smn3 = ifelse(as.numeric(date_smn3)>=as.numeric(fup_start),1,0),
+      sumind_smn4 = ifelse(as.numeric(date_smn4)>=as.numeric(fup_start),1,0),
+      sumind_smn5 = ifelse(as.numeric(date_smn5)>=as.numeric(fup_start),1,0),
+      sumind_smn6 = ifelse(as.numeric(date_smn6)>=as.numeric(fup_start),1,0),
+      sumind_smn7 = ifelse(as.numeric(date_smn7)>=as.numeric(fup_start),1,0),
+    # indicator for any smn (invasive or not)
+    any_smn = ifelse(sumind_smn1 ==1 | sumind_smn2 ==1 | sumind_smn3 ==1 | sumind_smn4 ==1 | sumind_smn5 ==1 | sumind_smn6 ==1 | sumind_smn7 ==1,1,0 ),
+    # sum of smns
+    num_smn = rowSums(
+      cbind(sumind_smn1, sumind_smn2, sumind_smn3, sumind_smn4, sumind_smn5,
+            sumind_smn6, sumind_smn7),
+      na.rm = T
+    ),
+###  2024-11-13
+  # now do the same conditional on inv
+####  
+  sumind_inv_smn1 = ifelse(smn1_mal == 1 & (as.numeric(date_smn1)>=as.numeric(fup_start)),1,0),
+      sumind_inv_smn2 = ifelse(smn2_mal == 1 & (as.numeric(date_smn2)>=as.numeric(fup_start)),1,0),
+      sumind_inv_smn3 = ifelse(smn3_mal == 1 & (as.numeric(date_smn3)>=as.numeric(fup_start)),1,0),
+      sumind_inv_smn4 = ifelse(smn4_mal == 1 & (as.numeric(date_smn4)>=as.numeric(fup_start)),1,0),
+      sumind_inv_smn5 = ifelse(smn5_mal == 1 & (as.numeric(date_smn5)>=as.numeric(fup_start)),1,0),
+      sumind_inv_smn6 = ifelse(smn6_mal == 1 & (as.numeric(date_smn6)>=as.numeric(fup_start)),1,0),
+      sumind_inv_smn7 = ifelse(smn7_mal == 1 & (as.numeric(date_smn7)>=as.numeric(fup_start)),1,0),
+  # indicator for any invasive smn
+    any_inv_smn = ifelse(sumind_inv_smn1 ==1 | sumind_inv_smn2 ==1 | sumind_inv_smn3 ==1 | sumind_inv_smn4 ==1 | sumind_inv_smn5 ==1 | sumind_inv_smn6 ==1 | sumind_inv_smn7 ==1,1,0 ),
+  # sum of invasive smns
+    num_inv_smn = rowSums(
+      cbind(sumind_inv_smn1, sumind_inv_smn2, sumind_inv_smn3, sumind_inv_smn4, sumind_inv_smn5,
+            sumind_inv_smn6, sumind_inv_smn7),
+      na.rm = T
+    ),
+
+  # other variables
+  smk_evr_rec = case_when(
+    smoke_ever == 0 ~ 0,
+    smoke_ever == 1 ~ 1,
+    smoke_ever == 99 ~ NA_real_
+  )
+)
+
+
+  
+
+#write.csv(neg_fut, "./output/to-check_smn_date.csv", quote = F, na = "", row.names = F)
+
+
+# subset to 1989 and later
+# filter out those that had smn before fup_start
+dta5 = dta4 %>% filter(
+  y_diagnose >= 1989,
+  ftime_cmpr_inv >0,
+  age_dx >=15 & age_dx <= 50 # as per NEJM paper, limit age
+)
+
+cr1 = cmprsk::cuminc(dta5$ftime_cmpr_inv, dta5$cmpr_inv)
+
+View(
+  dtaf %>% select(
+    c(
+      fup_start,
+      date_livedead,
+      date_1st_inv,
+      date_lc,
+      date_smn1,
+      ftime_livedead,
+      ftime_lc,
+      ftime_inv_smn,
+      ftime_cmpr_inv,
+      cmpr_inv,
+      cmpr_breast,
+      ftime_breast,
+      cmpr_prostate,
+      ftime_prostate
+    )
+  )
+)
+
+dtaf = dta5; #rm(list = c("dta5","dta4","dta3","dta2","dta1","dta0"))
+
+View(
+  dtaf %>% select(
+    c(
+      fup_start,
+      date_livedead,
+      date_1st_inv,
+      date_lc,
+      date_smn1,
+      date_max_fu,
+      ftime_livedead,
+      ftime_lc,
+      ftime_inv_smn,
+      ftime_cmpr_inv,
+      ftime_max,
+      cmpr_inv,
+      cmpr_breast,
+      ftime_breast,
+      cmpr_prostate,
+      ftime_prostate,
+
+    )
+  )
+)
+```
+
+```{r}
+
+#| label: chemo-dose-Eline
+#| execute: false
+
+
+
+```
+
+```{r}
+
+#| label: chemo-rt-class
+
+
+```
+
+
+```{r}
+
+#| label: tbl1
+
+# create vars for tbl1 
+
+dta_tbl1 = dtaf %>% mutate(
+  rx_period = factor(
+      case_when(
+        lubridate::year(ddx) < 1995 ~ 1, # 1989-1995
+        lubridate::year(ddx) >= 1995 & lubridate::year(ddx) < 2005 ~ 2, # 1995-2005
+        lubridate::year(ddx) >= 2005  ~ 3 # 2005-2013
+      ),
+      levels = 1:3,
+      labels = c("1989-1994", "1995-2004", "2005-2013")
+  ),
+  
+  # age at diagnosis
+  
+  age_dx = factor(
+    case_when(
+      age_dx < 25 ~ 1, # 15 to 24
+      age_dx >= 25 & age_dx < 35 ~ 2, # 25 to 34
+      age_dx >=35 & age_dx <=50 ~ 3,  #  35 to 50
+    ),
+    levels = 1:3,
+    labels = c("15-24 yr",
+               "25-34 yr",
+               "35-50 yr")
+  ),
+  
+  # maximum follow-up time
+  
+  ftime_max = factor(
+    case_when(
+      ftime_max < 10 ~ 1,  # <5 years since 5-year survival
+      ftime_max >= 10 & ftime_max <20 ~ 2,  # 10 to <20 years since 5-year survival,
+      ftime_max > 20 ~ 3, # 20 to 28 (or max)
+    ),
+    levels = 1:3,
+    labels = c(
+      "5-9 yr",
+      "10-19 yr",
+      "20-28 yr"
+    )
+  ),
+  
+  # anthracycline recript
+  
+  anthrac5 = factor(
+    case_when(
+      anthrac5 == 9 ~ NA_real_ ,
+      anthrac5 == 0 ~ 0,
+      anthrac5 == 1 ~ 1,
+    ),
+    levels = 0:1,
+    labels = c("No","Yes")
+  ),
+  
+  alk5 = factor(
+    case_when(
+      alk5 == 9 ~ NA_real_ ,
+      alk5 == 0 ~ 0,
+      alk5 == 1 ~ 1,
+    ),
+    levels = 0:1,
+    labels = c("No","Yes")
+  ),
+  
+    procarbazine = factor(
+    case_when(
+      procarbazine == 9 ~ NA_real_ ,
+      procarbazine == 0 ~ 0,
+      procarbazine == 1 ~ 1,
+    ),
+    levels = 0:1,
+    labels = c("No","Yes")
+  ),
+  
+  rtcatprim = factor(
+    rtcatprim,
+    levels = c(0,1,2,3,4,5,6,9),
+    labels = c(
+      "No radiotherapy",
+      "Incomplete mantlefield, supra only",
+      "Incomplete mantlefield supra+infra/mid-body radiotherapy",
+      "Full mantlefield only",
+      "Full mantlefield +infra/mid-body radiotherapy",
+      "Infra/mid-body radiotherapy only",
+      "Other radiotherapy",
+      "Radiotherapy but field unknown"
+    )
+  )
+)
+
+dta_tbl1 %>% gtsummary::tbl_summary(
+  include = c(
+    age_dx,
+    rx_period,
+    ftime_max,
+    anthrac5,
+    alk5,
+    procarbazine,
+    rtcatprim
+  ),
+  label = list(
+    age_dx ~ "Age at diagnosis",
+    rx_period ~ "Year of diagnosis",
+    ftime_max ~ "Maximum follow-up Time",
+    anthrac5 ~ "Receipt of anthracyclines within 5 years after dx",
+    alk5  ~ "Receipt of alkylators within 5 years after dx",
+    procarbazine ~ "Receipt of procarbazine within 5 years after dx",
+    rtcatprim ~ "Type of radiotherapy fields received, primary therapy"
+  ),
+  type = list(
+    c(anthrac5, alk5, procarbazine, rtcatprim) ~ "categorical"
+  )
+) %>% gtsummary::modify_footnote_body(
+  footnote = "Follow-up begins 5 years after diagnosis",
+  columns = "label",
+  rows = label == "Year of diagnosis"
+) %>% gtsummary::as_gt() #%>% gt::as_latex()
+
+tbl1
+
+
+
+```
+
+\newpage
+
+```{r}
+
+#| label: rt-mod-cross
+
+tbl_rt_cross = dta_tbl1 %>% gtsummary::tbl_cross(
+  rtcatprim, rx_period,
+  label = list(
+    rx_period ~ "Year of diagnosis",
+    rtcatprim ~ "Type of radiotherapy fields received, primary therapy"
+  ),
+  percent = "column"
+) %>% 
+  gtsummary::bold_labels() %>% 
+  gtsummary::as_gt()
+  
+gt::gtsave(
+  tbl_rt_cross,
+  here::here("output","cross_rt_rx-period.docx")
+)
+
+```
+
+```{r}
+
+#| label: smn-summary
+
+
+
+```
+
+```{r}
+
+#| label: cml-inc
+
+# A. Overall, any SMN
+
+dta_cuminc = dtaf %>% mutate(
+  ftime_cmpr_inv = round( ftime_cmpr_inv, 3), # for some reason, rounding fixed error in tidycmprsk::cuminc
+  ftime_cmpr_breast = round( ftime_cmpr_breast, 3),
+  ftime_cmpr_prostate = round( ftime_cmpr_prostate, 3),
+  cmpr_inv = factor(cmpr_inv,
+                    levels = 0:2,
+                    labels = c("Censor","Invasive SMN", "Death")
+  ),
+  cmpr_breast = factor(cmpr_breast,
+                    levels = 0:2,
+                    labels = c("Censor","Invasive BC", "Death")
+  ),
+  cmpr_prostate = factor(cmpr_prostate,
+                    levels = 0:2,
+                    labels = c("Censor","Invasive PrC", "Death")
+  ),
+  sex = factor(
+    case_when(
+      sex %in% c(1,2) ~ 1,
+      sex == 0 ~ 0
+    ),
+    levels = 0:1,
+    labels = c("Male","Female"
+  )
+),
+
+  age_dx_cat = factor(
+    case_when(
+      age_dx < 25 ~ 1, # 15 to 24
+      age_dx >= 25 & age_dx < 35 ~ 2, # 25 to 34
+      age_dx >=35 & age_dx <=50 ~ 3,  #  35 to 50
+    ),
+    levels = 1:3,
+    labels = c("15-24 yr",
+               "25-34 yr",
+               "35-50 yr")
+  ),
+ rx_period = factor(
+      case_when(
+        lubridate::year(ddx) < 2000 ~ 1, # before 2000
+        lubridate::year(ddx) >= 2000 ~ 2 # 2005-2013
+      ),
+      levels = 1:2,
+      labels = c("1989-1999","2000-2013")
+ ),
+  ctprim = factor(
+    case_when(
+      ctprim == 0 ~ 0,
+      ctprim == 1 ~ 1,
+      ctprim == 9 ~ NA_real_
+    ),
+    levels = 0:1,
+    labels = c("No chemotherapy","Chemotherapy")
+  ),
+  rtprim = factor(
+    case_when(
+      rtprim == 0 ~ 0,
+      rtprim == 1 ~ 1,
+      rtprim == 9 ~ NA_real_
+    ),
+    levels = 0:1,
+    labels = c("No RT","RT")
+  ),
+  
+  ct_rt_prim = factor(
+    case_when(
+      ctprim == "No chemotherapy" & rtprim == "No RT" ~ 0, # neither
+      ctprim == "Chemotherapy"& rtprim == "No RT" ~ 1, # CT only
+      ctprim == "No chemotherapy" & rtprim == "RT" ~ 2, # RT only
+      ctprim == "Chemotherapy" & rtprim == "RT" ~ 3  # CT + RT
+    ),
+    levels = 0:3,
+    labels = c("Neither",
+               "Chemotherapy Only",
+               "RT Only",
+               "Chemotherapy + RT")
+  ),
+  anthrac5 = factor(
+      case_when(
+        anthrac5 == 9 ~ NA_real_ ,
+        anthrac5 == 0 ~ 0,
+        anthrac5 == 1 ~ 1,
+      ),
+      levels = 0:1,
+      labels = c("No","Yes")
+    ),
+    
+    alk5 = factor(
+      case_when(
+        alk5 == 9 ~ NA_real_ ,
+        alk5 == 0 ~ 0,
+        alk5 == 1 ~ 1,
+      ),
+      levels = 0:1,
+      labels = c("No","Yes")
+    ),
+      procarbazine = factor(
+      case_when(
+        procarbazine == 9 ~ NA_real_ ,
+        procarbazine == 0 ~ 0,
+        procarbazine == 1 ~ 1,
+      ),
+      levels = 0:1,
+      labels = c("No","Yes")
+    ),
+
+
+  # rtcatprim = factor(
+  #   rtcatprim,
+  #   levels = c(0,1,2,3,4,5,6,9),
+  #   labels = c(
+  #     "No radiotherapy",
+  #     "Incomplete mantlefield, supra only",
+  #     "Incomplete mantlefield supra+infra/mid-body radiotherapy",
+  #     "Full mantlefield only",
+  #     "Full mantlefield +infra/mid-body radiotherapy",
+  #     "Infra/mid-body radiotherapy only",
+  #     "Other radiotherapy",
+  #     "Radiotherapy but field unknown"
+  #   )
+  # )
+  rt_supra = factor(
+    case_when(
+      rtsupraprim == 0 & rtsuprafup == 0 & rtsuprafup2 ~ 0,
+      rtsupraprim %in% c(1,2) | rtsuprafup %in% c(1,2) | rtsuprafup2 %in% c(1,2) ~ 1,
+      rtsupraprim == 9 & rtsuprafup == 9 & rtsuprafup2 == 9 ~ NA_real_
+    ),
+  levels = 0:1,
+  labels = c("No supradiaphragmatic RT",
+             "Supradiaphragmatic RT")
+)
+)
+
+# non-stratified cmprsk object
+
+cmprsk_obj_ovl = tidycmprsk::cuminc(
+  Surv(time = ftime_cmpr_inv, event = factor(cmpr_inv)) ~ 1,
+  data = dta_cuminc
+)
+
+## create test dataset
+# (used for debugging)
+# 
+# t1 = tibble(ftimes = seq(0,9.54,0.01),
+#             events = rep(c(0,1,2),332))
+# 
+# tidycmprsk::cuminc(
+#   Surv(time = ftimes, event = factor(events)) ~ 1,
+#   data = t1
+# )
+
+##
+
+
+# set plot paramaters
+
+x_lims = c(0,30)
+y_lims = c(0,0.5)
+x_breaks = seq(0,30,5)
+y_breaks = seq(0,0.5,0.1)
+x_lab = "Follow-up time (years)"
+y_lab = "Cumulative Incidence"
+plot_cls = paletteer::paletteer_d("MetBrewer::Egypt",n=4, type = "discrete")
+
+
+cuminc_plot_ovl = ggsurvfit::ggcuminc(cmprsk_obj_ovl,
+                    outcome = c("Invasive SMN")
+                    ) +  ggsurvfit::add_risktable(
+                      times = x_breaks
+                    ) + ggsurvfit::add_confidence_interval(
+                    ) + ggplot2::scale_x_continuous(
+                      breaks = x_breaks,
+                      limits = x_lims
+                    ) + scale_y_continuous(
+                      breaks = y_breaks,
+                      limits = y_lims
+                    ) + labs(
+                      x = x_lab,
+                      y = y_lab
+                    )
+## by sex
+
+cmprsk_obj_sex = tidycmprsk::cuminc(
+  Surv(time = ftime_cmpr_inv, event = factor(cmpr_inv)) ~ sex,
+  data = dta_cuminc
+)
+
+cuminc_plot_sex = ggsurvfit::ggcuminc(cmprsk_obj_sex,
+                    outcome = c("Invasive SMN")
+                    ) +  ggsurvfit::add_risktable(
+                      times = x_breaks
+                    ) + ggsurvfit::add_confidence_interval(
+                    ) + ggplot2::scale_x_continuous(
+                      breaks = x_breaks,
+                      limits = x_lims
+                    ) + scale_y_continuous(
+                      breaks = y_breaks,
+                      limits = y_lims
+                    )  + scale_fill_manual(
+                      values = plot_cls[1:2]
+                    ) + scale_color_manual(
+                      values = plot_cls[1:2]
+                    ) + labs(
+                      x = x_lab,
+                      y = y_lab
+                    )  + add_pvalue(
+                      caption = "Log-rank {p.value}",
+                      location = "annotation",
+                      size = 4,
+                      x = 6,
+                      y = 0.4
+                    )
+# by age
+
+cmprsk_obj_age = tidycmprsk::cuminc(
+  Surv(time = ftime_cmpr_inv, event = factor(cmpr_inv)) ~ age_dx_cat,
+  data = dta_cuminc
+)
+
+cuminc_plot_age= ggsurvfit::ggcuminc(cmprsk_obj_age,
+                    outcome = c("Invasive SMN")
+                    ) +  ggsurvfit::add_risktable(
+                      times = x_breaks
+                    ) + ggsurvfit::add_confidence_interval(
+                    ) + ggplot2::scale_x_continuous(
+                      breaks = x_breaks,
+                      limits = x_lims
+                    ) + scale_y_continuous(
+                      breaks = y_breaks,
+                      limits = y_lims
+                    ) + scale_color_manual(
+                      values = plot_cls
+                    )  + scale_fill_manual(
+                      values = plot_cls
+                    ) + labs(
+                      x = x_lab,
+                      y = y_lab
+                    ) + add_pvalue(
+                      caption = "Log-rank {p.value}",
+                      location = "annotation",
+                      size = 4,
+                      x = 6,
+                      y = 0.4
+                    )
+
+# by era
+
+cmprsk_obj_period = tidycmprsk::cuminc(
+  Surv(time = ftime_cmpr_inv, event = factor(cmpr_inv)) ~ rx_period,
+  data = dta_cuminc
+)
+
+cuminc_plot_period = ggsurvfit::ggcuminc(cmprsk_obj_period,
+                    outcome = c("Invasive SMN")
+                    ) +  ggsurvfit::add_risktable(
+                      times = x_breaks
+                    ) + ggsurvfit::add_confidence_interval(
+                    ) + ggplot2::scale_x_continuous(
+                      breaks = x_breaks,
+                      limits = x_lims
+                    ) + scale_y_continuous(
+                      breaks = y_breaks,
+                      limits = y_lims
+                    ) + scale_color_manual(
+                      values = plot_cls[1:2]
+                    ) + scale_fill_manual(
+                      values = plot_cls[1:2]
+                    ) + labs(
+                      x = x_lab,
+                      y = y_lab
+                    ) + add_pvalue(
+                      caption = "Log-rank {p.value}",
+                      location = "annotation",
+                      size = 4,
+                      x = 6,
+                      y = 0.4
+                    )
+
+anysmn_cumin_plots = ggarrange(
+  cuminc_plot_ovl,
+  cuminc_plot_sex,
+  cuminc_plot_age,
+  cuminc_plot_period,
+  
+  align = "hv"
+)
+
+# output combined
+ggsave(
+  here::here("output","AnySMN_cuminc_plots.tiff"),
+  anysmn_cumin_plots,
+  width = 8,
+  height = 7,
+  units = "in"
+       )
+
+# output overall
+ggsave(
+  here::here("output","AnySMN_ovl_cuminc_plots.tiff"),
+  cuminc_plot_ovl,
+  width = 8,
+  height = 5,
+  units = "in"
+       )
+
+# outut by era
+ggsave(
+  here::here("output","AnySMN_by-era_cuminc_plots.tiff"),
+  cuminc_plot_period,
+  width = 8,
+  height = 5,
+  units = "in"
+       )
+
+
+
+
+
+```
+
+```{r}
+
+#| label: cum-inc-rx
+
+# Cumulative incidence plots based on treatment received
+
+# cumulative incidence by anthracycline receipt
+
+cmprsk_obj_at = tidycmprsk::cuminc(
+  Surv(time = ftime_cmpr_inv, event = factor(cmpr_inv)) ~ anthrac5,
+  data = dta_cuminc
+)
+
+cuminc_plot_at = ggsurvfit::ggcuminc(cmprsk_obj_at,
+                    outcome = c("Invasive SMN")
+                    ) +  ggsurvfit::add_risktable(
+                      times = x_breaks
+                    ) + ggsurvfit::add_confidence_interval(
+                    ) + ggplot2::scale_x_continuous(
+                      breaks = x_breaks,
+                      limits = x_lims
+                    ) + scale_y_continuous(
+                      breaks = y_breaks,
+                      limits = y_lims
+                    )  + scale_fill_manual(
+                      values = plot_cls[1:2]
+                    ) + scale_color_manual(
+                      values = plot_cls[1:2]
+                    ) + labs(
+                      x = x_lab,
+                      y = y_lab
+                    )  + add_pvalue(
+                      caption = "Log-rank {p.value}",
+                      location = "annotation",
+                      size = 4,
+                      x = 6,
+                      y = 0.4
+                    )
+
+
+# cumulative incidence by alkylator receipt
+cmprsk_obj_alk = tidycmprsk::cuminc(
+  Surv(time = ftime_cmpr_inv, event = factor(cmpr_inv)) ~ alk5,
+  data = dta_cuminc
+)
+
+cuminc_plot_alk = ggsurvfit::ggcuminc(cmprsk_obj_alk,
+                    outcome = c("Invasive SMN")
+                    ) +  ggsurvfit::add_risktable(
+                      times = x_breaks
+                    ) + ggsurvfit::add_confidence_interval(
+                    ) + ggplot2::scale_x_continuous(
+                      breaks = x_breaks,
+                      limits = x_lims
+                    ) + scale_y_continuous(
+                      breaks = y_breaks,
+                      limits = y_lims
+                    )  + scale_fill_manual(
+                      values = plot_cls[1:2]
+                    ) + scale_color_manual(
+                      values = plot_cls[1:2]
+                    ) + labs(
+                      x = x_lab,
+                      y = y_lab
+                    )  + add_pvalue(
+                      caption = "Log-rank {p.value}",
+                      location = "annotation",
+                      size = 4,
+                      x = 6,
+                      y = 0.4
+                    )
+
+# cumulative incidence by procarbazine receipt
+cmprsk_obj_pro = tidycmprsk::cuminc(
+  Surv(time = ftime_cmpr_inv, event = factor(cmpr_inv)) ~ procarbazine,
+  data = dta_cuminc
+)
+
+cuminc_plot_pro = ggsurvfit::ggcuminc(cmprsk_obj_pro,
+                    outcome = c("Invasive SMN")
+                    ) +  ggsurvfit::add_risktable(
+                      times = x_breaks
+                    ) + ggsurvfit::add_confidence_interval(
+                    ) + ggplot2::scale_x_continuous(
+                      breaks = x_breaks,
+                      limits = x_lims
+                    ) + scale_y_continuous(
+                      breaks = y_breaks,
+                      limits = y_lims
+                    )  + scale_fill_manual(
+                      values = plot_cls[1:2]
+                    ) + scale_color_manual(
+                      values = plot_cls[1:2]
+                    ) + labs(
+                      x = x_lab,
+                      y = y_lab
+                    )  + add_pvalue(
+                      caption = "Log-rank {p.value}",
+                      location = "annotation",
+                      size = 4,
+                      x = 6,
+                      y = 0.4
+                    )
+
+# cumulative incidence by RT receipt
+cmprsk_obj_rt = tidycmprsk::cuminc(
+  Surv(time = ftime_cmpr_inv, event = factor(cmpr_inv)) ~ rtprim,
+  data = dta_cuminc
+)
+
+cuminc_plot_rt = ggsurvfit::ggcuminc(cmprsk_obj_rt,
+                    outcome = c("Invasive SMN")
+                    ) +  ggsurvfit::add_risktable(
+                      times = x_breaks
+                    ) + ggsurvfit::add_confidence_interval(
+                    ) + ggplot2::scale_x_continuous(
+                      breaks = x_breaks,
+                      limits = x_lims
+                    ) + scale_y_continuous(
+                      breaks = y_breaks,
+                      limits = y_lims
+                    )  + scale_fill_manual(
+                      values = plot_cls[1:2]
+                    ) + scale_color_manual(
+                      values = plot_cls[1:2]
+                    ) + labs(
+                      x = x_lab,
+                      y = y_lab
+                    )  + add_pvalue(
+                      caption = "Log-rank {p.value}",
+                      location = "annotation",
+                      size = 4,
+                      x = 6,
+                      y = 0.4
+                    )
+
+
+# cumulative incidence by RT and CT receipt
+
+
+
+cmprsk_obj_rtct = tidycmprsk::cuminc(
+  Surv(time = ftime_cmpr_inv, event = factor(cmpr_inv)) ~ ct_rt_prim,
+  data = dta_cuminc[dta_cuminc$ct_rt_prim != "Neither",]                        # because it is distracting, excluding those that received neither
+)
+
+cuminc_plot_rtct = ggsurvfit::ggcuminc(cmprsk_obj_rtct,
+                    outcome = c("Invasive SMN")
+                    ) +  ggsurvfit::add_risktable(
+                      times = x_breaks
+                    ) + ggsurvfit::add_confidence_interval(
+                    ) + ggplot2::scale_x_continuous(
+                      breaks = x_breaks,
+                      limits = x_lims
+                    ) + scale_y_continuous(
+                      breaks = y_breaks,
+                      limits = y_lims
+                    )  + scale_fill_manual(
+                      values = plot_cls[1:4]
+                    ) + scale_color_manual(
+                      values = plot_cls[1:4]
+                    ) + labs(
+                      x = x_lab,
+                      y = y_lab
+                    )  + add_pvalue(
+                      caption = "Log-rank {p.value}",
+                      location = "annotation",
+                      size = 4,
+                      x = 6,
+                      y = 0.4
+                    )
+
+ggarrange(
+  cuminc_plot_at,
+  cuminc_plot_alk,
+  cuminc_plot_rt,
+  cuminc_plot_rtct
+)
+
+
+```
+
+```{r}
+
+#| label: sbcs-cuminc
+
+# subset to female
+
+dta_cuminc_br = dta_cuminc %>% 
+  filter(sex == "Female")
+
+
+cmprsk_obj_br_ovl = tidycmprsk::cuminc(
+  Surv(time = ftime_cmpr_breast, event = factor(cmpr_breast)) ~ 1,
+  data = dta_cuminc_br
+)
+
+cuminc_plot_br_ovl = ggsurvfit::ggcuminc(cmprsk_obj_br_ovl,
+                    outcome = c("Invasive BC")
+                    ) +  ggsurvfit::add_risktable(
+                      times = x_breaks
+                    ) + ggsurvfit::add_confidence_interval(
+                    ) + ggplot2::scale_x_continuous(
+                      breaks = x_breaks,
+                      limits = x_lims
+                    ) + scale_y_continuous(
+                      breaks = y_breaks,
+                      limits = y_lims
+                    ) + labs(
+                      x = x_lab,
+                      y = y_lab
+                    )
+## by age
+
+cmprsk_obj_br_age = tidycmprsk::cuminc(
+  Surv(time = ftime_cmpr_breast, event = factor(cmpr_breast)) ~ age_dx_cat,
+  data = dta_cuminc_br
+)
+cuminc_plot_br_age = ggsurvfit::ggcuminc(cmprsk_obj_br_age,
+                    outcome = c("Invasive BC")
+                    ) +  ggsurvfit::add_risktable(
+                      times = x_breaks
+                    ) + ggsurvfit::add_confidence_interval(
+                    ) + ggplot2::scale_x_continuous(
+                      breaks = x_breaks,
+                      limits = x_lims
+                    ) + scale_y_continuous(
+                      breaks = y_breaks,
+                      limits = y_lims
+                    )  + scale_fill_manual(
+                      values = plot_cls[1:3]
+                    ) + scale_color_manual(
+                      values = plot_cls[1:3]
+                    ) + labs(
+                      x = x_lab,
+                      y = y_lab
+                    )  + add_pvalue(
+                      caption = "Log-rank {p.value}",
+                      location = "annotation",
+                      size = 4,
+                      x = 6,
+                      y = 0.4
+                    )
+
+# by era
+
+cmprsk_obj_br_period = tidycmprsk::cuminc(
+  Surv(time = ftime_cmpr_breast, event = factor(cmpr_breast)) ~ rx_period,
+  data = dta_cuminc_br
+)
+
+cuminc_plot_br_period = ggsurvfit::ggcuminc(cmprsk_obj_br_period,
+                    outcome = c("Invasive BC")
+                    ) +  ggsurvfit::add_risktable(
+                      times = x_breaks
+                    ) + ggsurvfit::add_confidence_interval(
+                    ) + ggplot2::scale_x_continuous(
+                      breaks = x_breaks,
+                      limits = x_lims
+                    ) + scale_y_continuous(
+                      breaks = y_breaks,
+                      limits = y_lims
+                    ) + scale_color_manual(
+                      values = plot_cls[1:2]
+                    ) + scale_fill_manual(
+                      values = plot_cls[1:2]
+                    ) + labs(
+                      x = x_lab,
+                      y = y_lab
+                    ) + add_pvalue(
+                      caption = "Log-rank {p.value}",
+                      location = "annotation",
+                      size = 4,
+                      x = 6,
+                      y = 0.4
+                    )
+
+
+ggsave(
+  here::here("output","cuminc_breast_by-period_2025-11-08.tiff"),
+  cuminc_plot_br_period,
+  width = 8,
+  height = 5,
+  units = "in"
+       )
+
+non_rx_br_plots = ggarrange(
+  cuminc_plot_br_ovl,
+  cuminc_plot_br_age,
+  cuminc_plot_br_period,
+  
+  align = "hv"
+  
+
+)
+
+annotate_figure(non_rx_br_plots, top = text_grob("Cumulative incidence of any invasive SMN", 
+               color = "black", face = "bold", size = 14))
+
+
+```
+
+```{r}
+
+#| label: sbcs-rx-strat
+
+###
+
+# RX stratified plots
+
+###
+
+cmprsk_obj_br_period = tidycmprsk::cuminc(
+  Surv(time = ftime_cmpr_breast, event = factor(cmpr_breast)) ~ rx_period,
+  data = dta_cuminc_br
+)
+
+# cumulative incidence by anthracycline receipt
+
+cmprsk_obj_br_at = tidycmprsk::cuminc(
+  Surv(time = ftime_cmpr_breast, event = factor(cmpr_breast)) ~ anthrac5,
+  data = dta_cuminc_br
+)
+
+
+cuminc_plot_br_at = ggsurvfit::ggcuminc(cmprsk_obj_br_at,
+                    outcome = c("Invasive BC")
+                    ) +  ggsurvfit::add_risktable(
+                      times = x_breaks
+                    ) + ggsurvfit::add_confidence_interval(
+                    ) + ggplot2::scale_x_continuous(
+                      breaks = x_breaks,
+                      limits = x_lims
+                    ) + scale_y_continuous(
+                      breaks = y_breaks,
+                      limits = y_lims
+                    # )  + scale_fill_manual(
+                    #   values = plot_cls[1:2]
+                    # ) + scale_color_manual(
+                    #   values = plot_cls[1:2]
+                    ) + labs(
+                      x = x_lab,
+                      y = y_lab
+                    )  + add_pvalue(
+                      caption = "Log-rank {p.value}",
+                      location = "annotation",
+                      size = 4,
+                      x = 6,
+                      y = 0.4
+                    )
+
+
+# cumulative incidence by alkylator receipt
+cmprsk_obj_alk = tidycmprsk::cuminc(
+  Surv(time = ftime_cmpr_inv, event = factor(cmpr_inv)) ~ alk5,
+  data = dta_cuminc
+)
+
+cuminc_plot_alk = ggsurvfit::ggcuminc(cmprsk_obj_alk,
+                    outcome = c("Invasive SMN")
+                    ) +  ggsurvfit::add_risktable(
+                      times = x_breaks
+                    ) + ggsurvfit::add_confidence_interval(
+                    ) + ggplot2::scale_x_continuous(
+                      breaks = x_breaks,
+                      limits = x_lims
+                    ) + scale_y_continuous(
+                      breaks = y_breaks,
+                      limits = y_lims
+                    )  + scale_fill_manual(
+                      values = plot_cls[1:2]
+                    ) + scale_color_manual(
+                      values = plot_cls[1:2]
+                    ) + labs(
+                      x = x_lab,
+                      y = y_lab
+                    )  + add_pvalue(
+                      caption = "Log-rank {p.value}",
+                      location = "annotation",
+                      size = 4,
+                      x = 6,
+                      y = 0.4
+                    )
+
+# cumulative incidence by procarbazine receipt
+cmprsk_obj_pro = tidycmprsk::cuminc(
+  Surv(time = ftime_cmpr_inv, event = factor(cmpr_inv)) ~ procarbazine,
+  data = dta_cuminc
+)
+
+cuminc_plot_pro = ggsurvfit::ggcuminc(cmprsk_obj_pro,
+                    outcome = c("Invasive SMN")
+                    ) +  ggsurvfit::add_risktable(
+                      times = x_breaks
+                    ) + ggsurvfit::add_confidence_interval(
+                    ) + ggplot2::scale_x_continuous(
+                      breaks = x_breaks,
+                      limits = x_lims
+                    ) + scale_y_continuous(
+                      breaks = y_breaks,
+                      limits = y_lims
+                    )  + scale_fill_manual(
+                      values = plot_cls[1:2]
+                    ) + scale_color_manual(
+                      values = plot_cls[1:2]
+                    ) + labs(
+                      x = x_lab,
+                      y = y_lab
+                    )  + add_pvalue(
+                      caption = "Log-rank {p.value}",
+                      location = "annotation",
+                      size = 4,
+                      x = 6,
+                      y = 0.4
+                    )
+
+# cumulative incidence by RT receipt
+cmprsk_obj_rt = tidycmprsk::cuminc(
+  Surv(time = ftime_cmpr_inv, event = factor(cmpr_inv)) ~ rtprim,
+  data = dta_cuminc
+)
+
+cuminc_plot_rt = ggsurvfit::ggcuminc(cmprsk_obj_rt,
+                    outcome = c("Invasive SMN")
+                    ) +  ggsurvfit::add_risktable(
+                      times = x_breaks
+                    ) + ggsurvfit::add_confidence_interval(
+                    ) + ggplot2::scale_x_continuous(
+                      breaks = x_breaks,
+                      limits = x_lims
+                    ) + scale_y_continuous(
+                      breaks = y_breaks,
+                      limits = y_lims
+                    )  + scale_fill_manual(
+                      values = plot_cls[1:2]
+                    ) + scale_color_manual(
+                      values = plot_cls[1:2]
+                    ) + labs(
+                      x = x_lab,
+                      y = y_lab
+                    )  + add_pvalue(
+                      caption = "Log-rank {p.value}",
+                      location = "annotation",
+                      size = 4,
+                      x = 6,
+                      y = 0.4
+                    )
+
+
+# cumulative incidence by RT and CT receipt
+
+
+
+cmprsk_obj_rtct = tidycmprsk::cuminc(
+  Surv(time = ftime_cmpr_inv, event = factor(cmpr_inv)) ~ ct_rt_prim,
+  data = dta_cuminc[dta_cuminc$ct_rt_prim != "Neither",]                        # because it is distracting, excluding those that received neither
+)
+
+cuminc_plot_rtct = ggsurvfit::ggcuminc(cmprsk_obj_rtct,
+                    outcome = c("Invasive SMN")
+                    ) +  ggsurvfit::add_risktable(
+                      times = x_breaks
+                    ) + ggsurvfit::add_confidence_interval(
+                    ) + ggplot2::scale_x_continuous(
+                      breaks = x_breaks,
+                      limits = x_lims
+                    ) + scale_y_continuous(
+                      breaks = y_breaks,
+                      limits = y_lims
+                    )  + scale_fill_manual(
+                      values = plot_cls[1:4]
+                    ) + scale_color_manual(
+                      values = plot_cls[1:4]
+                    ) + labs(
+                      x = x_lab,
+                      y = y_lab
+                    )  + add_pvalue(
+                      caption = "Log-rank {p.value}",
+                      location = "annotation",
+                      size = 4,
+                      x = 6,
+                      y = 0.4
+                    )
+
+ggarrange(
+  cuminc_plot_at,
+  cuminc_plot_alk,
+  cuminc_plot_rt,
+  cuminc_plot_rtct
+)
+
+```
+
+```{r}
+
+#| label: multivariable-sbc-models
+
+br_surv_obj = Surv(dta_cuminc_br$ftime_cmpr_breast, event = dta_cuminc_br$cmpr_breast)
+tidycmprsk::crr(
+  Surv(ftime_cmpr_breast, event = cmpr_breast) ~ age_dx + anthrac5 + rx_period +  + recur + smoke_diag,
+  data = dta_cuminc_br
+  
+  
+  #### fix supradiaphragmatic variable
+)
+
+
+
+
+```
+
+```{r}
+
+#| label: prostate-cuminc
+
+
+dta_cuminc_pr = dta_cuminc %>% 
+  filter(sex == "Male")
+
+
+cmprsk_obj_pr_ovl = tidycmprsk::cuminc(
+  Surv(time = ftime_cmpr_prostate, event = factor(cmpr_prostate)) ~ 1,
+  data = dta_cuminc_pr
+)
+
+cuminc_plot_pr_ovl = ggsurvfit::ggcuminc(cmprsk_obj_pr_ovl,
+                    outcome = c("Invasive PrC")
+                    ) +  ggsurvfit::add_risktable(
+                      times = x_breaks
+                    ) + ggsurvfit::add_confidence_interval(
+                    ) + ggplot2::scale_x_continuous(
+                      breaks = x_breaks,
+                      limits = x_lims
+                    ) + scale_y_continuous(
+                      breaks = y_breaks,
+                      limits = y_lims
+                    ) + labs(
+                      x = x_lab,
+                      y = y_lab
+                    )
+## by age
+
+
+cmprsk_obj_pr_age = tidycmprsk::cuminc(
+  Surv(time = ftime_cmpr_prostate, event = factor(cmpr_prostate)) ~ age_dx_cat,
+  data = dta_cuminc_pr
+)
+cuminc_plot_pr_age = ggsurvfit::ggcuminc(cmprsk_obj_pr_age,
+                    outcome = c("Invasive PrC")
+                    ) +  ggsurvfit::add_risktable(
+                      times = x_breaks
+                    ) + ggsurvfit::add_confidence_interval(
+                    ) + ggplot2::scale_x_continuous(
+                      breaks = x_breaks,
+                      limits = x_lims
+                    ) + scale_y_continuous(
+                      breaks = y_breaks,
+                      limits = y_lims
+                    )  + scale_fill_manual(
+                      values = plot_cls[1:3]
+                    ) + scale_color_manual(
+                      values = plot_cls[1:3]
+                    ) + labs(
+                      x = x_lab,
+                      y = y_lab
+                    )  + add_pvalue(
+                      caption = "Log-rank {p.value}",
+                      location = "annotation",
+                      size = 4,
+                      x = 6,
+                      y = 0.4
+                    )
+
+# by era
+
+cmprsk_obj_pr_period = tidycmprsk::cuminc(
+  Surv(time = ftime_cmpr_prostate, event = factor(cmpr_prostate)) ~ rx_period,
+  data = dta_cuminc_pr
+)
+
+cuminc_plot_pr_period = ggsurvfit::ggcuminc(cmprsk_obj_pr_period,
+                    outcome = c("Invasive PrC")
+                    ) +  ggsurvfit::add_risktable(
+                      times = x_breaks
+                    ) + ggsurvfit::add_confidence_interval(
+                    ) + ggplot2::scale_x_continuous(
+                      breaks = x_breaks,
+                      limits = x_lims
+                    ) + scale_y_continuous(
+                      breaks = y_breaks,
+                      limits = y_lims
+                    ) + scale_color_manual(
+                      values = plot_cls[1:2]
+                    ) + scale_fill_manual(
+                      values = plot_cls[1:2]
+                    ) + labs(
+                      x = x_lab,
+                      y = y_lab
+                    ) + add_pvalue(
+                      caption = "Log-rank {p.value}",
+                      location = "annotation",
+                      size = 4,
+                      x = 6,
+                      y = 0.4
+                    )
+
+
+ggsave(
+  here::here("output","cuminc_prostate_by-period_2025-11-08.tiff"),
+  cuminc_plot_br_period,
+  width = 8,
+  height = 5,
+  units = "in"
+       )
+
+```
+
+
+```{r}
+
+#| label: chemo-doses-ms
+
+
+
+
+```
+
+```{r}
+
+#| label: chemo-doses-shahin
+
+# This chunk adapted from Script sent by Shahin on 2025-27-10
+
+
+
+#Read in overview of chemotherapy drugs; remove description
+
+chem_drugs <- readxl::read_xlsx(here::here("secure_data","chem_drugs.xlsx")) %>% as_tibble() %>% 
+  mutate(drug=ifelse(is.na(drug),desc,drug)) %>% select(-desc)
+
+# anthrac is considered as doxo so: doxo_data
+
+anthrac_data <- readxl::read_xlsx(here::here("secure_data","Doxorubicin dosages for available treatments.xlsx")) %>% 
+  as_tibble %>% select(trt,dose)
+
+# procarbazine dose
+procarbazine_data <- readxl::read_xlsx(here::here("secure_data","Procarbazine dosages for available treatments.xlsx")) %>% 
+  as_tibble() %>%
+  select(1,dose) %>% 
+  rename_at(1,~'trt')
+
+p1 <- dtaf %>% select(r_regel,
+                      matches('^ct'),
+                      matches("^(c|n|o)[1-9]"),                                 # get all c/n/o 1-9 and prim/fup/fup2
+                      matches("^(m|d|y)_ct")) %>%                               # get all ct dates
+  select(-starts_with('o')) %>%                                                 # remove o (comment)
+  unite('ctprim_date',d_ctprim:y_ctprim,sep='-',remove=T) %>%                   # date for ctprim start
+  unite('ctfup_date', c(d_ctfup, m_ctfup, y_ctfup),sep='-',remove=T) %>%        # date for ctfup
+  unite('ctfup2_date',d_ctfup2:y_ctfup2,sep='-',remove=T) %>%                   # date for ctfup 2
+  mutate_at(c('ctprim_date','ctfup_date','ctfup2_date'),dmy) %>%                # convert to dmy
+  left_join(dtaf %>% select(r_regel,ddx),by='r_regel') %>%                      # merge ddx in
+  mutate(ctprim_time=as.numeric(ctprim_date-as.Date(ddx)),                      # elapsed days (some are negative with dx start is before ddx)
+         ctfup_time=as.numeric(ctfup_date-as.Date(ddx)),
+         ctfup2_time=as.numeric(ctfup2_date-as.Date(ddx))) %>% 
+#  select(-ends_with('_date')) %>%                                               # no big advantage to remove these; helpful for cross-checking
+  mutate_at(
+    select(
+      .,ctprim:n8ctfup2
+      ) %>% 
+      names,
+    function(x){
+      x[x==999]<-NA ; x
+      }
+    ) %>%
+  mutate_at(
+    select(
+      .,matches('c[1-9]')
+      ) %>% 
+      names,
+    function(x){                       #
+    left_join(
+      tibble(code=x), chem_drugs)$drug %>% 
+        str_trim()
+  }
+  ) %>% 
+  mutate_at(
+    c('ctprim','ctfup','ctfup2'),
+    function(x){
+      x[x==9]<-NA ; x
+      }
+    ) %>% 
+  mutate_at(
+    c('ctprim','ctfup','ctfup2'),
+    ~as.factor(.) %>% 
+    fct_recode('no'='0','yes'='1'))
+
+
+p1$ct <- p1 %>% select(R_regel,ctprim:n8ctfup2) %>%
+  
+  relocate(ctfup,ctfup2,.after=ctprim) %>% 
+  
+  (function(x){
+    
+    as.list(seq(5,length(x),2)) %>% map(~x[,.:(.+1)])
+    
+  }) %>% map(function(x){
+    
+    x %>% mutate_at(names(x)[2],function(x){
+      
+      x <- str_c('||',x,' cycles||')
+      
+      #x[is.na(x)] <- ''
+      
+      return(x)
+      
+    })
+    
+  }) %>% map(function(x){
+    
+    n <- names(x)[1]
+    
+    tib <- tibble(x=apply(x,1,function(x) str_c(x,collapse=' ')))
+    
+    names(tib) <- n ; tib
+    
+  }) %>% reduce(cbind) %>% as_tibble %>% 
+  
+  #mutate_all(function(x){ x[is.na(x)] <- '' ; x}) %>% 
+  
+  cbind(.,p1 %>% select(ctprim_time,ctfup_time,ctfup2_time)) %>% 
+  
+  as_tibble() %>% (function(x){
+    
+    l <- list()
+    
+    for (i in c('ctprim','ctfup','ctfup2')){
+      
+      l[[i]] <- select(x,ends_with(i),all_of(str_c(i,'_time')))
+      
+    } ; return(l)
+    
+  }) %>% map_at(2:3,function(x){
+    
+    a <- x[,length(x)]
+    
+    index <- which((!is.na(a) & a>1825) | is.na(a))
+    
+    mutate_at(x,x[,1:(length(x)-1)] %>% names,function(x){
+      
+      x[index] <- NA
+      
+      return(x)
+      
+    })
+    
+  }) %>% 
+  
+  map(function(x){
+    
+    x <- x[,-length(x)]
+    
+    apply(x,1,function(x) str_c(na.omit(x),collapse=' --- '))
+    
+  }) %>% as.data.frame %>% as_tibble() %>% 
+  
+  (function(x){
+    
+    res <- apply(x,1,function(x) str_c(x[x!=''],collapse=' --- '))
+    
+    #res[res==''] <- 'No primary chemotherapy'
+    
+    return(res)
+    
+  })
+
+p1$ct <- p1 %>% mutate(ct2=ifelse(ct=='' & (!is.na(ctprim) & ctprim=='no'),'No primary chemotherapy',ct)) %>% 
+  
+  mutate_at('ct2',function(x){ x[x==''] <- NA ; x }) %>% select(-ct) %>% rename('ct'='ct2') %>% pull(ct)
+
+
+pa_calc <- function(v,proc=T){
+  
+  inside_fun <- function(p){
+    
+    str_split(p,' --- ')[[1]] %>% as.list() %>% 
+      
+      map(~str_split(.,' \\|\\|')[[1]] %>% str_remove_all('\\||') %>% str_trim) %>% 
+      
+      map_dfr(function(x) tibble(trt=x[1],cycle=x[2] %>% 
+                                   
+                                   str_remove(' cycles') %>% as.numeric)) %>% 
+      
+      mutate_at('cycle',function(x){ x[is.na(x)] <- 1 ; x }) %>% 
+      
+      group_by(trt) %>% summarise(cycle=sum(cycle)) %>% 
+      
+      (function(a){
+        
+        if (proc) left_join(a,procarbazin_data,by='trt') else left_join(a,anthrac_data,by='trt')
+        
+      }) %>% 
+      
+      mutate(dose=dose*cycle) %>% .$dose %>% sum(.,na.rm=T)
+    
+  }
+  
+  res <- c()
+  
+  for (i in 1:length(v)) res[i] <- ifelse(is.na(v[i]),NA,inside_fun(v[i]))
+  
+  return(res)
+  
+}
+
+p1$anthrac_dose <- pa_calc(p1$ct,F)
+
+p1$proc_dose <- pa_calc(p1$ct)
+
+
+p1 %>% select(R_regel,ct,anthrac_dose,proc_dose)
+
+
+
+```

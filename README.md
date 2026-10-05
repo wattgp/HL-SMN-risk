@@ -1,85 +1,92 @@
-# SMN-risk
+Date README last edited: 2026-10-05
 
-Risk of subsequent malignant neoplasms (SMNs) among Hodgkin lymphoma (HL)
-survivors in the HL survivorship cohort, diagnosed 1989 or later.
+# Watt-HL-SMN
+*Risk of subsequent malignant neoplasms for >5-year survivors of Hodgkin Lymphoma in the Netherlands*
 
-Follow-up starts 5 years after HL diagnosis and ends at the first invasive
-SMN, death, or last contact. Death is treated as a competing risk.
-Secondary analyses look at first invasive breast cancer (women) and first
-invasive prostate cancer (men).
+## People and permissions
+
+Gordie Watt (rw)
+Michael Schaapveld (r)
+Beatriz Torrinha (r)
 
 ## Open issues
 
-- [ ] **Check follow-up time units.** Every `ftime_*` variable in
-  `scripts/01_clean-data.R` is computed as
-  `as.numeric(date_a - date_b)/86400/365.25`, which assumes the difference is
-  in seconds. Subtracting two date-times in R normally returns a `difftime`
-  in *days*, which would make follow-up times about 86,400 times too small.
-  Check with `summary(dta2$ftime_cmpr_inv)`; if values are tiny, switch to
-  `lubridate::time_length(date_a - date_b, "years")`.
+- [ ] **Check follow-up time units.** Follow-up times in
+  `scripts/SMN-risk.qmd` (`prepare-outcome-variables` chunk) are computed as
+  `as.numeric(date_a - date_b)/86400/365.25`, assuming the difference is in
+  seconds. Subtracting two date-times in R normally returns a `difftime` whose
+  units are chosen automatically (usually *days*), which would make follow-up
+  times about 86,400 times too small. `ftime_breast` is divided by `365.25`
+  only, so it is on a different scale from `ftime_livedead` and `ftime_lc`,
+  which it is compared with in `cmpr_breast`. Check with
+  `summary(dtaf[c("ftime_inv_smn","ftime_breast","ftime_livedead")])`; the fix
+  is to use `lubridate::time_length(date_a - date_b, "years")` everywhere.
 
-## Repository layout
+## Project Description
+
+### Purpose 
+The last comprehensive update on SMN risk in the HL cohort was in 2015
+(Schaapveld _et al. NEJM_ 2015). Since then, the cohort has continued to grow, 
+including treatment date through 2013 and follow-up through 2022. 
+
+The purpose of this study is to evaluate the risk of SMNs for a more contemporary 
+set of survivors, treated from 1989-2013, with up to 28 years of follow-up.
+
+Follow-up starts 5 years after HL diagnosis and ends at the first invasive SMN,
+death, or last contact; death is a competing risk. The analytic cohort is
+restricted to diagnosis in 1989 or later and age 15-50 at diagnosis (as in the
+NEJM paper). Secondary analyses look at first invasive breast cancer (women)
+and prostate cancer (men).
+
+### Basic wayfinding
+
+`renv` is used for managing dependencies. The lockfile `renv.lock` can be read in
+when recreating this work to ensure that R version and package dependencies
+are satisfied (`renv::restore()`).
+
+`git` is used for version control. The primary repository is 
+https://gitlab.rhpc.nki.nl/Epi-H8/hl-smn/watt-hl-smn; a copy is kept on GitHub
+(https://github.com/wattgp/HL-SMN-risk). The main branch used by 
+G. Watt during analysis is protected. Please create a new branch for further
+analyses. The .gitignore file includes proprietary files (.docx) plus anything
+that may include data (i.e. all delimited, binary, and .xslx files, and the
+`secure_data/` folder).
+
+This is an R project (Watt-HL-SMN.Rproj). Paths are built with `here::here()`
+relative to the project root.
+
+The main analysis file for the manuscripts is `SMN-risk.qmd`, saved in the 
+`/scripts` folder. There are a number of 'helper scripts' with miscellaneous 
+functions or derivations that are saved separately alongside this file in the 
+`/scripts` directory.
+
+Output is saved in `output`. Anything that is included in the manuscripts 
+should be findable here.
+
+### Repository layout
 
 ```
-SMN-risk.qmd             report (Quarto -> Word); reads derived data only
+Watt-HL-SMN.Rproj
 scripts/
-  00_paths.R             locations of raw and derived data on the secure drive
-  01_clean-data.R        raw export -> derived datasets
-  stata/                 earlier Stata cleaning/analysis code (reference only)
-output/                  non-identifiable check files and outputs
-renv.lock, renv/         pinned R package versions
-SMN-risk.Rproj           RStudio project
+  SMN-risk.qmd                     main analysis (cleaning, outcomes, tables, figures)
+  anthra_dose_Eline.R              anthracycline dose derivation (adapted from Eline)
+  code-skeleton-anthra_...R        draft lookup-table approach to chemotherapy doses
+  stata/                           2015 NEJM Stata cleaning/analysis code (reference only)
+output/                            figures and tables for the manuscripts
+secure_data/                       NOT in git: raw and intermediate data (see below)
+renv.lock, renv/                   pinned R package versions
 ```
 
-## Data
+### Data
 
-Patient-level data are **never stored in this repository**. They live on the
-secure drive and are located by `scripts/00_paths.R`:
+Patient-level data are never committed. They live in `secure_data/` in the
+project root on the analysis server, which is excluded by `.gitignore`:
 
-| | Windows (MDW) | Mac |
-|---|---|---|
-| Secure root | `U://HL/SMN-risk/secure_data` | `/Volumes/g.watt/HL/SMN-risk/secure_data` |
+- `secure_data/2024-12-12/ResearchDB_Export_from-Power-BI.csv`: raw export (read-only)
+- `secure_data/intermediate/full_dataset_basic_cleaning.Rds`: after basic
+  cleaning (missing-value codes set to `NA`, cleaned names); written by
+  `SMN-risk.qmd`
+- `secure_data/chem_drugs.xlsx`, `secure_data/*dosages for available treatments.xlsx`:
+  chemotherapy lookup tables
 
-- **Raw (read-only):** `secure_data/2024-12-12/ResearchDB_Export_from-Power-BI.csv`
-- **Derived (written by the cleaning script):** `secure_data/derived/`
-  - `smn_derived_full.rds`: all patients, with derived variables
-  - `smn_analytic_cohort.rds`: analytic cohort (diagnosed 1989+, at risk at
-    start of follow-up), with treatment and covariate recodes
-
-`.gitignore` excludes common data formats (`.csv`, `.xl*`, `.dta`, `.rds`,
-...). Check `git status` before committing anything new.
-
-## Setup
-
-Requires R 4.4.2 and Quarto.
-
-```r
-renv::restore()   # install the package versions in renv.lock
-```
-
-## Running the analysis
-
-From the project root (open `SMN-risk.Rproj`):
-
-1. Build the derived data (re-run whenever the raw export or a variable
-   definition changes):
-   ```r
-   source("scripts/01_clean-data.R")
-   ```
-2. Render the report:
-   ```sh
-   quarto render SMN-risk.qmd
-   ```
-   This produces `SMN-risk.docx`.
-
-When a new raw export arrives, put it in a new dated folder under
-`secure_data/` and update `raw_file` in `scripts/00_paths.R`.
-
-## Key definitions
-
-- **Invasive SMN:** ICD-O behaviour code 3, 6 or 9.
-- **Start of follow-up (`fup_start`):** HL diagnosis date + 5 years.
-- **Competing-risk outcomes (`cmpr_*`):** 0 = censored, 1 = event,
-  2 = death (competing risk). Matching times are in `ftime_cmpr_*`.
-- **SMN site groups:** derived from ICD-O topography codes; see
-  `*_sitename` in `scripts/01_clean-data.R`.
+Check `git status` before committing anything new.

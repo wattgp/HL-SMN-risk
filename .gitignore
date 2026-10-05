@@ -2,11 +2,20 @@
 .Rhistory
 .RData
 .Ruserdata
+.DS_Store
 
+# Data and anything that may contain data (patient-level data must never be committed)
+/secure_data/
+/data/
 *.xl*
 *.Rdata
+*.RData
 *.Rds
+*.rds
 *.csv
+*.parquet
+*.feather
+*.arrow
 *.doc
 *.docx
 *.bim
@@ -15,8 +24,6 @@
 *.dta
 *.log
 *.tmp
+
+# Quarto render cache (can contain computed results)
 /.quarto/
-*.rds
-*.RData
-/data/
-/secure_data/
