@@ -193,6 +193,9 @@ dta2 = dta1 %>%
    rx_start = pmin(date_chemo_start, date_rt_start, na.rm = T), #520 missing both
    # use ddx instead
    fup_start = ddx %m+% years(5), # add 5 years to ddx to start follow-up
+   # TODO: check units -- /86400 assumes the difference is in seconds, but
+   # date-time differences are usually in days. Applies to all ftime_* below.
+   # See README 'Open issues'.
    ftime_inv_smn = as.numeric(date_1st_inv - fup_start)/86400/365.25,
     
    # 2nd, calculate time to death, if deceased
