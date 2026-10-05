@@ -315,13 +315,11 @@ dta2 = dta1 %>%
   
   breast_1st_inv_ind = case_when(
     site_1st_inv == "Breast" ~ 1,
-    site_1st_inv != "Breast"  ~ 0 # includes na
+    site_1st_inv != "Breast" | is.na(site_1st_inv) ~ 0 # includes na
   ),
   
-  date_breast_1st_inv = case_when(
-    breast_1st_inv_ind == 1 ~ date_1st_inv,
-    breast_1st_inv_ind != 0 ~ NA_Date_
-  ),
+  # NA (of the same date-time class as date_1st_inv) if 1st invasive SMN was not breast
+  date_breast_1st_inv = if_else(breast_1st_inv_ind == 1, date_1st_inv, NA),
   
   # adjustment variable for nonbreast 
   # analysis A: adjust for dx of other cancer
@@ -381,9 +379,9 @@ dta2 = dta1 %>%
    ),
    
    ftime_cmpr_breast = case_when(
-     cmpr_inv == 1 ~ ftime_breast,
-     cmpr_inv == 2 ~ ftime_livedead,
-     cmpr_inv == 0 ~ pmin(ftime_livedead, ftime_lc)
+     cmpr_breast == 1 ~ ftime_breast,
+     cmpr_breast == 2 ~ ftime_livedead,
+     cmpr_breast == 0 ~ pmin(ftime_livedead, ftime_lc)
    ),
 
   #####################
@@ -397,14 +395,17 @@ dta2 = dta1 %>%
     site_1st_inv != "Prostate" | is.na(site_1st_inv) ~ 0
     ),
   
-  # adjustment variable for nonbreast
+  # adjustment variable for nonprostate
   
   nonprostate_1st_inv_ind = case_when(
     site_1st_inv != "Prostate" & !is.na(site_1st_inv) ~ 1, # nonprostate
     site_1st_inv == "Prostate" | is.na(site_1st_inv)  ~ 0  # other, inc. na
   ),
   
-     ftime_prostate = as.numeric(date_1st_inv[prostate_1st_inv_ind == 1] - fup_start)/86400/365.25,
+  # NA if 1st invasive SMN was not prostate
+  date_prostate_1st_inv = if_else(prostate_1st_inv_ind == 1, date_1st_inv, NA),
+
+     ftime_prostate = as.numeric(date_prostate_1st_inv - fup_start)/86400/365.25,
     
    # 2nd, calculate time to death, if deceased
    
@@ -425,9 +426,9 @@ dta2 = dta1 %>%
    
    cmpr_prostate = case_when(   # factor for censor/event/cr
      
-     # group A - both dead and breast SMN
-     !is.na(ftime_prostate) & livedead_rec == 1 & (ftime_breast <= ftime_livedead) ~ 1, # event
-     !is.na(ftime_prostate) & livedead_rec == 1 & (ftime_breast > ftime_livedead) ~ 2, # CR
+     # group A - both dead and prostate SMN
+     !is.na(ftime_prostate) & livedead_rec == 1 & (ftime_prostate <= ftime_livedead) ~ 1, # event
+     !is.na(ftime_prostate) & livedead_rec == 1 & (ftime_prostate > ftime_livedead) ~ 2, # CR
      
      # group B - SMN but alive 
      
