@@ -16,3 +16,7 @@
 *.log
 *.tmp
 /.quarto/
+*.rds
+*.RData
+/data/
+/secure_data/
