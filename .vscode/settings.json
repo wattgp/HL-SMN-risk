@@ -1,0 +1,8 @@
+{
+    "r.bracketedPaste": true,
+    "r.sessionWatcher": true,
+    "editor.formatOnSave": true,
+    "r.alwaysUseActiveTerminal": true,
+    "terminal.integrated.agentHostProfile.linux": "",
+    "r.consolePath": "home/g.watt/.local/bin/radian"
+}

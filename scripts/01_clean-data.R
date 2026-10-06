@@ -12,8 +12,8 @@ library(janitor)
 library(lubridate)
 library(stringr)
 
-here::i_am("scripts/01_clean-data.R")
 library(here)
+here::i_am()
 
 # ---- read raw data ----------------------------------------------------------
 
