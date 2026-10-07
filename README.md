@@ -1,4 +1,4 @@
-Date README last edited: 2026-10-05
+Date README last edited: 2026-10-07
 
 # Watt-HL-SMN
 *Risk of subsequent malignant neoplasms for >5-year survivors of Hodgkin Lymphoma in the Netherlands*
@@ -49,7 +49,24 @@ are satisfied (`renv::restore()`).
 https://gitlab.rhpc.nki.nl/Epi-H8/hl-smn/watt-hl-smn; a copy is kept on GitHub
 (https://github.com/wattgp/HL-SMN-risk). The main branch used by 
 G. Watt during analysis is protected. Please create a new branch for further
-analyses. The .gitignore file includes proprietary files (.docx) plus anything
+analyses.
+
+Remote set-up in G. Watt's working copy (collaborators cloning from GitLab
+only need the usual `origin`):
+
+```bash
+git remote add gitlab https://gitlab.rhpc.nki.nl/Epi-H8/hl-smn/watt-hl-smn.git
+git remote set-url --add --push origin https://github.com/wattgp/HL-SMN-risk.git
+git remote set-url --add --push origin https://gitlab.rhpc.nki.nl/Epi-H8/hl-smn/watt-hl-smn.git
+```
+
+- `origin` fetches from GitHub but pushes to both GitHub and GitLab, so
+  `git push origin <branch>` keeps the two copies in sync.
+- `gitlab` points to GitLab only. Use it to pull GitLab changes:
+  `git pull gitlab main`.
+- Check the set-up with `git remote -v`.
+
+The .gitignore file includes proprietary files (.docx) plus anything
 that may include data (i.e. all delimited, binary, and .xslx files, and the
 `secure_data/` folder).
 
