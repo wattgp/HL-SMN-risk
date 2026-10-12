@@ -23,7 +23,7 @@ here::i_am("scripts/01_clean-data.R")
 
 # ---- read raw data ----------------------------------------------------------
 
-# TRUE: synthetic data from secure_data/make_dummy_dataset.R (outputs go to
+# TRUE: synthetic data from scripts/make_dummy_dataset.R (outputs go to
 # secure_data/intermediate/dummy/); FALSE: the real ResearchDB export
 use_dummy <- TRUE
 
