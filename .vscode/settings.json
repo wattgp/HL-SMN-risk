@@ -2,7 +2,8 @@
     "r.bracketedPaste": true,
     "r.sessionWatcher": true,
     "editor.formatOnSave": true,
-    "r.alwaysUseActiveTerminal": true,
+    "r.alwaysUseActiveTerminal": false,
     "terminal.integrated.agentHostProfile.linux": "",
-    "r.consolePath": "home/g.watt/.local/bin/radian"
+    "r.rterm.linux": "/home/g.watt/.local/bin/radian",
+    "r.rpath.linux": "/opt/R/4.4.3/bin/R"
 }
