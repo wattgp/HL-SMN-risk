@@ -11,17 +11,12 @@ Beatriz Torrinha (r)
 
 ## Open issues
 
-- [ ] **Check follow-up time units.** Follow-up times in
-  `scripts/01_clean-data.R` (`prepare outcome variables` section) are computed as
-  `as.numeric(date_a - date_b)/86400/365.25`, assuming the difference is in
-  seconds. Subtracting two date-times in R normally returns a `difftime` whose
-  units are chosen automatically (usually *days*), which would make follow-up
-  times about 86,400 times too small. `ftime_breast` is divided by `365.25`
-  only, so it is on a different scale from `ftime_livedead` and `ftime_lc`,
-  which it is compared with in `cmpr_breast`. Check with
-  `summary(dtaf[c("ftime_inv_smn","ftime_breast","ftime_livedead")])` after
-  running the cleaning script; the fix
-  is to use `lubridate::time_length(date_a - date_b, "years")` everywhere.
+- [x] **Check follow-up time units** (fixed 2026-10-12). Follow-up times were
+  computed as `as.numeric(date_a - date_b)/86400/365.25`, but date-time
+  differences are in days, so they were about 86,400 times too small (and
+  `ftime_breast`, divided by `365.25` only, was on a different scale). All
+  follow-up times and `age_dx` now use
+  `lubridate::time_length(date_a - date_b, "years")`.
 
 ## Project Description
 

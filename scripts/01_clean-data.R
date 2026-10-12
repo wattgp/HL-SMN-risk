@@ -2,10 +2,16 @@
 # Reads the raw ResearchDB export, applies basic cleaning (missing-value codes,
 # names), derives dates, SMN outcomes and competing-risk follow-up variables,
 # restricts to the analytic cohort, and saves the derived datasets to
-# secure_data/intermediate/. The raw export is never modified.
+# secure_data/intermediate/ (or .../intermediate/dummy/ when use_dummy is TRUE).
+# The raw export is never modified.
 #
 # Run from the project (Watt-HL-SMN.Rproj):  source(here::here("scripts", "01_clean-data.R"))
 # Then render scripts/SMN-risk.qmd, which reads the derived data only.
+
+pkgs <- c("tidyverse", "janitor", "lubridate", "stringr", "here")
+missing_pkgs <- setdiff(pkgs, rownames(installed.packages()))
+# guard: under renv, install.packages() with an empty vector installs all deps
+if (length(missing_pkgs)) install.packages(missing_pkgs)
 
 library(tidyverse)
 library(janitor)
@@ -17,23 +23,41 @@ here::i_am("scripts/01_clean-data.R")
 
 # ---- read raw data ----------------------------------------------------------
 
-dta0 <- readr::read_csv(
-  here("secure_data", "2024-12-12", "ResearchDB_Export_from-Power-BI.csv"),
+# TRUE: synthetic data from secure_data/make_dummy_dataset.R (outputs go to
+# secure_data/intermediate/dummy/); FALSE: the real ResearchDB export
+use_dummy <- TRUE
+
+data_file <- if (use_dummy) {
+  here("secure_data", "DUMMY_research_dataset.csv")
+} else {
+  here("secure_data", "ResearchDB_Export_from-Power-BI.csv")
+}
+out_dir <- if (use_dummy) {
+  here("secure_data", "intermediate", "dummy")
+} else {
+  here("secure_data", "intermediate")
+}
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+# The export is semicolon-delimited. guess_max = Inf guesses column types from
+# all rows; the default (first 1000) mistypes 31 columns and drops their values.
+dta0 <- readr::read_delim(
+  data_file,
+  delim = ";",
   locale = locale(decimal_mark = ".", grouping_mark = ","),
-  col_names = TRUE
+  col_names = TRUE,
+  guess_max = Inf
 )
 
-dta1 <- dta0 %>% mutate_if(
+dta1 <- dta0 |> mutate_if(
   is.logical, as.character
 )
 
-# readr::problems(dta1) # no more problems
-
-# skimr::skim(dta1)
+# skimr::skim(dta1) # nolint
 
 # 97 are missing d_livedead
 
-# naniar::miss_var_summary(dta1)
+# naniar::miss_var_summary(dta1) # nolint
 
 # 100% missing for c6ctprim (6th cycle primary chemo), etc.
 
@@ -41,8 +65,8 @@ dta1 <- dta0 %>% mutate_if(
 
 # normalize headers
 
-basic_input_clean <- dta1 %>%
-  janitor::clean_names() %>%
+basic_input_clean <- dta1 |>
+  janitor::clean_names() |>
   mutate(
     #    across(                   # 777 indicates "other" chemotherapy and
     #      where(is.character),    # must be dealt with separately
@@ -95,7 +119,7 @@ if (interactive()) {
 # View(dta2[,grepl("/^999$/",dta2)]) # none left
 # View(dta2[,grepl(" ",dta2)]) # none left
 
-saveRDS(basic_input_clean, here::here("secure_data", "intermediate", "full_dataset_basic_cleaning.Rds"))
+saveRDS(basic_input_clean, file.path(out_dir, "full_dataset_basic_cleaning.Rds"))
 
 # ---- prepare outcome variables ----------------------------------------------
 
@@ -166,7 +190,7 @@ dta3 <- basic_input_clean %>%
 
     # age
 
-    age_dx = as.numeric(ddx - dob) / 365.25,
+    age_dx = time_length(ddx - dob, "years"),
 
     # indicator for malignant only
 
@@ -291,10 +315,9 @@ dta4 <- dta3 %>%
 
     fup_start = ddx %m+% years(5), # NOTE!!! add 5 years to ddx to start follow-up
 
-    # TODO: check units -- /86400 assumes the difference is in seconds, but
-    # date-time differences are usually in days; ftime_breast below divides by
-    # 365.25 only. See README 'Open issues'.
-    ftime_inv_smn = as.numeric(date_1st_inv - fup_start) / 86400 / 365.25, # ouptut in seconds so divid by secs in day then days in year
+    # follow-up times in years; time_length() converts whatever units the
+    # difftime has (date-time differences default to days, not seconds)
+    ftime_inv_smn = time_length(date_1st_inv - fup_start, "years"),
     # note: NA if no SMN
 
     # latest follow-up Date
@@ -309,15 +332,15 @@ dta4 <- dta3 %>%
       livedead == 2 ~ 1, # recoded `moved abroad' as `alive'
       livedead == 99 ~ NA_real_
     ),
-    ftime_livedead = as.numeric(date_livedead - fup_start) / 365.25 / 86400, # output in seconds so divide by days in year and seconds in day
+    ftime_livedead = time_length(date_livedead - fup_start, "years"),
 
     # 3rd, calculate time to last contact
 
-    ftime_lc = as.numeric(date_lc - fup_start) / 365.25 / 86400,
+    ftime_lc = time_length(date_lc - fup_start, "years"),
 
     # calculate longest follow-up time (really only for tbl1)
 
-    ftime_max = as.numeric(date_max_fu - fup_start) / 365.25 / 86400,
+    ftime_max = time_length(date_max_fu - fup_start, "years"),
 
     # 4th, bring it all together,
 
@@ -363,7 +386,7 @@ dta4 <- dta3 %>%
     # find minimum of SMN( invasive or in situ), death, or lfy
     # 1st, calcuate time to invasive SMN, if any
 
-    ftime_any_smn = as.numeric(date_smn1 - fup_start) / 86400 / 365.25,
+    ftime_any_smn = time_length(date_smn1 - fup_start, "years"),
 
     # 2nd, calculate time to death, if deceased
 
@@ -434,7 +457,7 @@ dta4 <- dta3 %>%
       site_1st_inv != "Breast" & !is.na(site_1st_inv) ~ 1, # nonbreast
       site_1st_inv == "Breast" | is.na(site_1st_inv) ~ 0 # other, inc. na
     ),
-    ftime_breast = as.numeric(date_breast_1st_inv - fup_start) / 365.25,
+    ftime_breast = time_length(date_breast_1st_inv - fup_start, "years"),
 
     # 2nd, calculate time to death, if deceased
 
@@ -501,7 +524,7 @@ dta4 <- dta3 %>%
       site_1st_inv != "Prostate" & !is.na(site_1st_inv) ~ 1, # nonprostate
       site_1st_inv == "Prostate" | is.na(site_1st_inv) ~ 0 # other, inc. na
     ),
-    ftime_prostate = as.numeric(date_prostate_1st_inv - fup_start) / 86400 / 365.25,
+    ftime_prostate = time_length(date_prostate_1st_inv - fup_start, "years"),
 
     # 2nd, calculate time to death, if deceased
 
@@ -646,7 +669,7 @@ if (interactive()) {
 
 # ---- save derived datasets --------------------------------------------------
 
-saveRDS(dta4, here::here("secure_data", "intermediate", "full_dataset_derived.Rds")) # all patients
-saveRDS(dtaf, here::here("secure_data", "intermediate", "analytic_cohort.Rds")) # 1989+, age 15-50, at risk at fup_start
+saveRDS(dta4, file.path(out_dir, "full_dataset_derived.Rds")) # all patients
+saveRDS(dtaf, file.path(out_dir, "analytic_cohort.Rds")) # 1989+, age 15-50, at risk at fup_start
 
-message("Saved ", nrow(dta4), " rows (all patients) and ", nrow(dtaf), " rows (analytic cohort) to secure_data/intermediate/")
+message("Saved ", nrow(dta4), " rows (all patients) and ", nrow(dtaf), " rows (analytic cohort) to ", out_dir)
