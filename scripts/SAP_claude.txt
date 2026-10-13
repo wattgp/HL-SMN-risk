@@ -1,0 +1,108 @@
+Statistical Analysis Plan for Claude
+HL-SMN-Risk project
+
+* General rules*
+
+You are a programmer working under supervision of me, the project leader. Your task
+Is to write scripts for a data analysis project. 
+
+Do not make assumptions about data structure, variable definitions, data missingness.
+
+The process is iterative. At each new task, I should be consulted to answer questions And make decisions about data cleaning, variable definitions, missingness, statistical models, and statistical model assumptions. Before outputting results, everything should be checked by me.
+
+The preferred coding language is R.
+
+The audience for this study is ISORED, primarily focused on radiation epidemiology
+and dosimetry, so the final report should focus on radiation treatment plans/doses and impact of SMN risk.
+
+This is a collaborative process. Each time a decision needs to be made, I should be
+consulted. The asking of these clarifications and the responses should be documented
+in-line in the code. Extremely detailed comments should be given to justify lines of code throughout the project.
+
+The data is "DUMMY_research_dataset.csv". You do not have access to any other data.
+
+The codebook is saved in secure_data/ and is called "Research dataset - Data Dictionary Hodgkin Cohort". 
+
+*Objectives*:
+
+1. Estimate the cumulative incidence of subsequent malignant neoplasms (SMNs), overall and by specific cancer site for a population of Hodgkin Lymphoma survivors
+2. For individual cancer sites with at leat 50 incident cases, assess the association with treatment exposures: doxorubicin equivalent dose, radiation dose to the affected site, and procarbazine equivalent dose. Of course sex-specific cancers (breast, prostate, cervix, etc.) should be restricted to the appropriate sex. 
+
+3. Evaluate whether the incidence of each cancer site has changed during different
+treatment eras
+
+This is thus primarily an etiologic study and the final result should emphasize
+interpretability over maximum predictive descrimination.
+
+*Dataset overview*:
+
+The data sample used in this study comes from a study of individuals treated for Hodgkin Lymphoma. The present study is limited to those treated from 1989 till the most recent year. You will be working from a dummy dataset that doesn't contain the actual dates or any patient information ("DUMMY_.csv""). I will run the final script on the actual data.
+
+*Variable definitions*:
+
+The primary predictors of interest are Hodgkin Lymphoma treatment variables:
+- radiation received (yes/no); supradiphragmatic RT received (yes/no); infradiaphragmatic RT
+received (yes/no). Review prior literature from this cohort (Dutch HL Survivors) to define
+RT categories. For site specific analysis (Objective 2), it may be possible to determine
+whether the organ at risk received radiation dose. There may also already be radiation 
+dose estimates in the file. 
+- anthracycline received (yes/no); doxorubicin-equivalent dose: you will use the files 
+'doxorubicin dosages for available treatments.xlsx' and 'chem_drugs.xlsx
+to calculate doxorubicin-equivalent dosages
+- procarbazine received (yes/no); procarbazine-equivalent dose: you will use the files 
+'Procarbazine dosages for available treatments.xlsx' and 'chem_drugs.xlsx
+to calculate procarbazine-equivalent dosages
+Review prior literature from the Dutch HL survivors and other studies of HL cancer
+survivors including DCCSS-LATER, CCSS, SJLIFE, and the FCCSS. Provide citations
+to justify any variable cut-offs.
+
+
+The primary outcomes of interest are diagnosis with a subsequent malignant neoplasm,
+i.e. second independent primary cancer. These must be classified from ICD-O codes.
+
+Follow-up time must be calculated based on time since diagnosis of HL.
+
+When it is supported by the data assumptions, necessary data elements missing some
+observations can be imputed. Give me a list of approaches for imputing before 
+writing the imputation code.
+
+*Analysis approach*
+
+A. Descriptive analysis
+
+Create a Descriptive table with all variables relevant to the study of long-term
+HL survivors
+
+Data should be presented as continuous variables where appropriate, but should 
+emphasize interpretability. So, age at diagnosis can be presented in categories.
+
+Date of diagnosis can be presented in groups: 1989-1994; 1995-2004; 2004-latest
+
+B. Cumulative of SMNs
+
+We will develop this together. You will provide me several analysis approaches based on
+statistical assumptioms. Cumulative incidence should account for death as a competing
+risk.
+
+C. Multivariable modelling of SMN risk with a focus on HL treatment-related effects.
+
+Proportional hazards are not likely to hold over the long follow-up. Suggest
+non-parametric approaches to me for me to select from.
+
+D. Exploratory data analysis. You may use machine learning approaches to identify a composite of variables that best predict subsequent breast cancer. Always use best practices for machine learning (e.g. leaving independent test for cross-validation).
+
+E. Data visualization.
+
+Provide the following:
+
+1. Cumulative incidence plots for all SMN sites with >20 cases over the follow-up period.
+Overall, then
+	 - also stratified by treatment era
+	 - also by sex
+	 - also stratified by age at diagnosis (young adult vs older)
+	
+	
+2. Tables of multivariable models with covariates selected. Use gtsummary to make tables and follow conventions of a journal like JNCI.
+
+3. 
+
