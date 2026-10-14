@@ -96,6 +96,16 @@
 # C15 (2026-10-14) Q: Age groups for the descriptive table? A: Scenario C:
 #    15-20 / 21-30 / 31-40 / 41-50 (completed years). The scenario table is
 #    still printed in section 11 for reference.
+# C16 (2026-10-14) Q: Two-group age split for the "young adult vs older"
+#    plots (SAP E.1)? A: AYA 15-39 vs 40-50 (scenario E): age_dx_aya.
+# C17 (2026-10-14) Q: Courses (or other data) dated after the end of
+#    observation? A: That is real follow-up. Total follow-up runs until the
+#    LAST DATE OF ANY DATA: last contact, vital status, SMN, HL relapse or
+#    treatment course (section 8). Death remains the competing event. This
+#    replaces P2 and the emigration rule of P1 in the main analysis; the
+#    earlier last-contact rule is kept for a sensitivity analysis
+#    (date_end_obs_lc, death_competing_lc). The project leader asked that
+#    the analysis script MUST include this sensitivity analysis (C17-LC).
 # C11 (2026-10-14) Site groups (section 5): APPROVED as shown. Small site
 #    groups are NOT merged in the data: every group is kept in smn_long and
 #    outcome_site_long, and all groups appear in a comprehensive SMN table in
@@ -103,8 +113,7 @@
 #    are set in 00_config.R (C12 there).
 #
 # STILL OPEN:
-# - Two-group age split for the "young adult vs older" cumulative incidence
-#   plots (SAP E.1): not yet chosen (scenario D, 15-29 / 30-50, suggested).
+#   (none)
 
 source(here::here("scripts", "00_config.R"))
 
@@ -215,6 +224,12 @@ pat <- tibble(researchid = raw$researchid) |>
     age_dx_group = cut(floor(age_dx), c(15, 21, 31, 41, 51),
       right = FALSE,
       labels = c("15-20", "21-30", "31-40", "41-50")
+    ),
+    # Two-group split for the "young adult vs older" cumulative incidence
+    # plots (C16): adolescents and young adults (AYA, 15-39) vs 40-50.
+    age_dx_aya = cut(floor(age_dx), c(15, 40, 51),
+      right = FALSE,
+      labels = c("AYA 15-39", "40-50")
     ),
 
     # Vital status (codebook): 0 alive, 1 dead, 2 moved abroad, 99 unknown.
@@ -463,22 +478,57 @@ pat <- pat |>
 
 # ---- 8. end of follow-up and competing-risk outcome (any invasive SMN) -----------
 
-# Censoring date for SMN ascertainment = date of last contact (codebook:
-# "most recent information up to which SMNs would be known").
+# C17 (end of follow-up): follow-up runs until the LAST DATE OF ANY DATA for
+# the patient: last contact, vital-status date, any SMN (any behaviour), HL
+# relapse, or the start of any treatment course. Death is the competing
+# event (on the death date); everyone else is censored at the last data
+# date. This supersedes P2 and the emigration part of P1 for the MAIN
+# analysis; the earlier last-contact rule is kept as a sensitivity version
+# (date_end_obs_lc, death_competing_lc).
 # Event coding: 1 = invasive SMN, 2 = death (competing), 0 = censored.
+course_dates <- tibble(
+  researchid = raw$researchid,
+  date_ctprim = mid_month_date(raw$m_ctprim, raw$y_ctprim),
+  date_ctfup = mid_month_date(raw$m_ctfup, raw$y_ctfup),
+  date_ctfup2 = mid_month_date(raw$m_ctfup2, raw$y_ctfup2),
+  date_rtprim = mid_month_date(raw$m_rtprim, raw$y_rtprim),
+  date_rtfup = mid_month_date(raw$m_rtfup, raw$y_rtfup),
+  date_rtfup2 = mid_month_date(raw$m_rtfup2, raw$y_rtfup2)
+)
+latest_smn_any_behaviour <- smn_long |>
+  filter(!is.na(date_smn)) |>
+  group_by(researchid) |>
+  summarise(date_latest_smn = max(date_smn), .groups = "drop")
+
 pat <- pat |>
+  left_join(course_dates, by = "researchid") |>
+  left_join(latest_smn_any_behaviour, by = "researchid") |>
   mutate(
-    # Date at which the patient stops being observed for SMNs, before
-    # considering SMN events (P1, P2):
-    #   alive / vital unknown: last contact
-    #   moved abroad: earlier of emigration date and last contact (P1)
-    #   dead: death date if on/before last contact (competing event);
-    #         otherwise last contact (P2)
-    death_competing = vital %in% "dead" & !is.na(date_vs) & !is.na(date_lc) &
+    date_last_data = pmax(date_lc_recorded, date_vs, date_recur, date_latest_smn,
+                          date_ctprim, date_ctfup, date_ctfup2,
+                          date_rtprim, date_rtfup, date_rtfup2, na.rm = TRUE),
+    # Which source gave the last data date (for checking).
+    last_data_source = case_when(
+      is.na(date_last_data) ~ NA_character_,
+      (date_last_data == date_lc_recorded) %in% TRUE ~ "last contact",
+      (date_last_data == date_vs) %in% TRUE ~ "vital status",
+      (date_last_data == date_latest_smn) %in% TRUE ~ "SMN",
+      (date_last_data == date_recur) %in% TRUE ~ "HL relapse",
+      TRUE ~ "treatment course"
+    ),
+
+    # -- main rule (C17) --
+    death_competing = vital %in% "dead" & !is.na(date_vs),
+    date_end_obs = if_else(death_competing, date_vs, date_last_data),
+    # Data dated after the death date are inconsistent; listed below.
+    data_after_death = death_competing & date_last_data > date_vs,
+
+    # -- sensitivity: earlier last-contact rule (P1, P2, C14) --
+    death_competing_lc = vital %in% "dead" & !is.na(date_vs) & !is.na(date_lc) &
       date_vs <= date_lc,
-    date_end_obs = case_when(
+    date_end_obs_lc = case_when(
       vital %in% "moved abroad" & p1_moved_abroad == "censor" ~ pmin(date_vs, date_lc, na.rm = TRUE),
-      death_competing ~ date_vs,
+      death_competing_lc ~ date_vs,
       TRUE ~ date_lc
     ),
     # Any-SMN outcome.
@@ -623,10 +673,14 @@ cat(
 
 cat("\n== Vital status (moved abroad: P1) ==\n")
 print(count(pat, vital))
-cat(
-  "Deaths after last contact, censored at last contact (P2):",
-  sum(pat$vital %in% "dead" & !pat$death_competing, na.rm = TRUE), "\n"
-)
+cat("Deaths: competing events", sum(pat$death_competing), "\n")
+cat("Records with data dated after the death date (C17; to review):",
+    sum(pat$data_after_death, na.rm = TRUE), "\n")
+
+cat("\n== Source of the last data date (C17), analytic cohort ==\n")
+print(count(cohort, last_data_source))
+cat("Median extra follow-up vs the last-contact rule (years):",
+    round(median(years_between(cohort$date_end_obs_lc, cohort$date_end_obs), na.rm = TRUE), 2), "\n")
 
 cat("\n== Dates with imputed month (P3) ==\n")
 print(c(

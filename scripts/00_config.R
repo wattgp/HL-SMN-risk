@@ -94,3 +94,25 @@ read_raw <- function(file = raw_file) {
 #    sites must be chosen sparingly (to be agreed per site).
 min_cases_plot <- 10
 min_cases_model <- 10
+
+# ---- dose categories (decision D11 / Q-CT5 / Q-CT6 in 02_chemo-doses.R) ----------
+
+# Input: cumulative dose in mg/m2 (NA stays NA). Neppelenbroek 2024 cut-offs.
+# Doxorubicin, primary: 0 / 1-200 / >200 mg/m2.
+doxo_cat <- function(mg) {
+  cut(mg, c(-Inf, 0, 200, Inf), labels = c("0", "1-200", ">200"))
+}
+# Doxorubicin, sensitivity (finer split): 0 / 1-200 / 201-349 / >=350 mg/m2
+# (Neppelenbroek's top category was 350-700; any higher value also falls in
+# the top category).
+doxo_cat_fine <- function(mg) {
+  cut(mg, c(-Inf, 0, 200, 349, Inf), labels = c("0", "1-200", "201-349", ">=350"))
+}
+# Procarbazine: 0 / <=4.2 / 4.3-8.4 / >8.4 g/m2.
+procarb_cat <- function(mg) {
+  cut(mg / 1000, c(-Inf, 0, 4.2, 8.4, Inf),
+      labels = c("0", "<=4.2", "4.3-8.4", ">8.4"))
+}
+# "High" procarbazine for the breast-cancer ovarian-damage modifier
+# (decision Q-RT3a): > 4.2 g/m2.
+procarb_high_mg <- 4200

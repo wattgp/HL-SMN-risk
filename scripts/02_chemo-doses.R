@@ -567,10 +567,7 @@ print(count(patient_any, procarb_registry, procarb_any))
 # change procarbazine category (D11) because of it. Primary course only here;
 # the final count uses the exposure window in the later script.
 cat("\n== S-CT98: patients with ChlVPP/ABV (code 98) ==\n")
-procarb_cat <- function(mg) {
-  cut(mg / 1000, c(-Inf, 0, 4.2, 8.4, Inf),
-      labels = c("0", "<=4.2", "4.3-8.4", ">8.4"))
-}
+# procarb_cat() is defined in 00_config.R (D11).
 s98 <- doses_course |>
   filter(course == "prim") |>
   semi_join(filter(slots_long, regimen_code == 98), by = "researchid") |>
@@ -603,17 +600,10 @@ print(summarise(dose_review, n = n(), doxo = sum(flag_doxo, na.rm = TRUE),
                 procarb = sum(flag_procarb, na.rm = TRUE),
                 abvd = sum(flag_abvd, na.rm = TRUE)))
 
-# ---- 8. dose categories (D11), for use by the exposure script -------------------
+# ---- 8. dose categories (D11) ---------------------------------------------------
 
-# Defined here, next to the doses, so every later script uses the same
-# cut-offs. Input is the cumulative dose in mg/m2.
-doxo_cat <- function(mg) {
-  cut(mg, c(-Inf, 0, 200, Inf), labels = c("0", "1-200", ">200"))
-}
-doxo_cat_fine <- function(mg) { # sensitivity (Q-CT6)
-  cut(mg, c(-Inf, 0, 200, 349, Inf), labels = c("0", "1-200", "201-349", "350-700"))
-}
-# procarb_cat() is defined in section 7 (0 / <=4.2 / 4.3-8.4 / >8.4 g/m2).
+# The cut-off functions doxo_cat(), doxo_cat_fine() and procarb_cat() are in
+# 00_config.R so that every script uses exactly the same categories.
 
 # ---- 9. save ----------------------------------------------------------------------
 

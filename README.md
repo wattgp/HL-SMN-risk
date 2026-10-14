@@ -54,7 +54,9 @@ The statistical analysis plan is `scripts/SAP_claude.txt`. In short:
   and under follow-up 5 years after diagnosis, with no invasive SMN before
   then.
 - **Follow-up** starts 5 years after HL diagnosis and ends at the first
-  invasive SMN, death (competing risk) or last contact. Times are kept on two
+  invasive SMN, death (competing risk) or the last date of any data for the
+  patient (last contact, vital status, SMN, relapse or treatment). Treatment
+  starting during follow-up counts as exposure from 2 years after its start. Times are kept on two
   scales: years since start of follow-up, and years since HL diagnosis (entry
   at 5 years).
 - **Outcome:** invasive SMNs (behaviour 3). "Any SMN" excludes non-melanoma
@@ -64,6 +66,20 @@ The statistical analysis plan is `scripts/SAP_claude.txt`. In short:
   bordering / 2 in field) and RT technique; cumulative doxorubicin and
   procarbazine dose. Treatment before the start of follow-up is fixed;
   later treatment is time-varying.
+
+### Planned sensitivity analyses
+
+Agreed with the project leader; the analysis script must include each one.
+
+| Tag | Sensitivity analysis | Main analysis | Data needed |
+|---|---|---|---|
+| C17-LC | End of follow-up at **last contact** (earlier rule: emigration censored, death after last contact censored at last contact) | End at the last date of any data | `date_end_obs_lc`, `death_competing_lc` (01) |
+| Q-RT1 | Organ exposure **binary** (in field vs not) | 0 / 1 / 2 | organ exposure (03, 04) |
+| R4-era | Diagnosis **era** as a surrogate for RT dose | – | `era` (01) |
+| Q-CT1 B | **Doxorubicin-equivalent** dose (Feijen 2019; COG ratios as a further check) | Doxorubicin dose + epirubicin yes/no | `doxo_eq_feijen_dose`, `doxo_eq_cog_dose` (02, 04) |
+| Q-CT6 | **Finer doxorubicin** categories 0 / 1-200 / 201-349 / >=350 | 0 / 1-200 / >200 | `doxo_cat_fine` (04) |
+| S-CT98 | ChlVPP/ABV procarbazine **700** mg/m2 per cycle | 1000 per cycle | `procarb_dose_s98`, `procarb_cat_s98` (02, 04) |
+| C13 | Duplicated ResearchIDs: keep one record (once the data manager has advised) | All 25 excluded | `read_raw()` (00) |
 
 ### How decisions are recorded
 
@@ -130,8 +146,8 @@ Dummy and real derived files go to separate folders, so they cannot be mixed
 up.
 
 Run the scripts in order from the project root (each is self-contained and
-reads the raw export itself, so 01-03 can run in any order, but the later
-analysis needs all three):
+reads the raw export itself, so 01-03 can run in any order; 04 needs the
+output of 01-03):
 
 | Step | Script | What it does | Main output (in `secure_data/intermediate[/dummy]/`) |
 |---|---|---|---|
@@ -139,13 +155,14 @@ analysis needs all three):
 | 1 | `scripts/01_clean-data.R` | Recodes every variable from the codebook; mid-month dates; SMN table with behaviour, site group, NMSC flag and body region; any-SMN and site-specific competing-risk outcomes (with the date of any other SMN, for adjustment); analytic cohort and exclusion flow; age-group scenarios. | `patients_all.Rds`, `smn_long.Rds`, `analytic_cohort.Rds`, `outcome_site_long.Rds`, `exclusion_flow.Rds`, `age_group_scenarios.Rds` |
 | 2 | `scripts/02_chemo-doses.R` | Regimen code x cycles -> cumulative doxorubicin dose, procarbazine dose (+ sensitivity S-CT98), doxorubicin-equivalent dose (sensitivity), yes/no variables, registry flags, plausibility review list. Per treatment course, with start dates. | `chemo_slots_long.Rds`, `chemo_doses_course.Rds`, `chemo_registry_flags.Rds`, `chemo_dose_review.Rds` |
 | 3 | `scripts/03_rt-exposure.R` | RT field flags -> organ exposure (0/1/2) per SMN site, RT technique, mediastinal, pelvic, supra-/infradiaphragmatic RT; descriptive tables of recorded RT doses. Per course, with start dates. | `rt_fields_course.Rds`, `rt_organ_course.Rds`, `rt_dose_description.Rds` |
-| 4 | *(to do)* exposure window | Joins 1-3: fixed exposure up to the start of follow-up, time-varying after; matches sarcoma/skin SMNs to RT fields by body region; applies the dose categories. | – |
+| 4 | `scripts/04_exposure-window.R` | Joins 1-3. Places each treatment course in time (missing dates: rules W1-W3); baseline (fixed) exposure at the start of follow-up and time-varying exposure after it; dose categories; ovarian damage; sarcoma/skin SMNs matched to RT fields by body region (descriptive). | `exposure_baseline.Rds`, `exposure_tv.Rds`, `course_timing.Rds`, `smn_field_match.Rds` |
 | 5 | *(to do)* analysis | Descriptive table (gtsummary), cumulative incidence with death as competing risk, multivariable models, exploratory ML for breast cancer, figures. Replaces `SMN-risk.qmd`. | `output/` |
 
 ```r
 source(here::here("scripts", "01_clean-data.R"))
 source(here::here("scripts", "02_chemo-doses.R"))
 source(here::here("scripts", "03_rt-exposure.R"))
+source(here::here("scripts", "04_exposure-window.R"))  # needs the output of 01-03
 ```
 
 Each script prints checks (counts, cross-tables, records to review) when it
@@ -164,6 +181,7 @@ scripts/
   01_clean-data.R                  raw export -> cleaned data, SMN outcomes, analytic cohort
   02_chemo-doses.R                 chemotherapy regimens -> doses and yes/no exposure
   03_rt-exposure.R                 RT field flags -> organ exposure, RT technique
+  04_exposure-window.R             baseline and time-varying exposure for the analytic cohort
   make_dummy_dataset.R             builds the synthetic dummy dataset from the real export
   SMN-risk.qmd                     OLD analysis file (old variable names; to be replaced)
   anthra_dose_Eline.R              old anthracycline dose code (reference only; different coding)
