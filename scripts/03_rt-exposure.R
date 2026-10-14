@@ -70,16 +70,10 @@ library(lubridate)
 
 # ---- 1. read the raw export ----------------------------------------------------
 
-# Read every column as character and recode each variable explicitly (see
-# 02_chemo-doses.R for why the blanket missing-code recode is not used).
-raw <- read_delim(
-  raw_file,
-  delim = ";",
-  col_types = cols(.default = col_character()),
-  locale = locale(decimal_mark = ".", grouping_mark = ","),
-  na = c("", "NA")
-)
-names(raw) <- tolower(names(raw))
+# Every column is read as character and recoded explicitly (see
+# 02_chemo-doses.R). Patients with a duplicated ResearchID are removed (C13
+# in 00_config.R).
+raw <- read_raw()
 
 unknown_text <- c("onbekend", "Onbekend", "ONBEKEND")
 

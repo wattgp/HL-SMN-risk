@@ -41,6 +41,46 @@ lookup_files <- list(
   procarbazine = here("secure_data", "Procarbazine-dosages-for available-treatments.xlsx")
 )
 
+# ---- reading the raw export (shared by all scripts) ---------------------------------
+
+# C13 (2026-10-14) Q: The real export has 25 ResearchIDs on more than one row
+#    (23 x 2 rows, 2 x 3 rows; 6,681 rows, 6,654 distinct IDs). The rows come
+#    from different source datasets (bron: validatie / basis ontw / uitbr
+#    ontw), usually a different hospital, and differ in clinical content
+#    (diagnosis month, HL morphology, last contact, RT/CT dates, SMN dates).
+#    Which row to use? A: For now, EXCLUDE ALL ROWS of these patients
+#    (option C). To do: ask the data manager which record is authoritative;
+#    revisit (options were: keep the validatie row; merge rows).
+#
+# read_raw() reads the export with every column as character (each variable
+# is recoded explicitly in the scripts, from the codebook), lower-cases the
+# column names (the export mixes capitalisation, e.g. "Smn2_site"), and
+# removes ALL rows of any ResearchID that occurs more than once (C13). The
+# removed IDs are returned as attribute "duplicate_ids" so that
+# 01_clean-data.R can count them in the exclusion flow.
+read_raw <- function(file = raw_file) {
+  raw <- readr::read_delim(
+    file,
+    delim = ";",
+    col_types = readr::cols(.default = readr::col_character()),
+    locale = readr::locale(decimal_mark = ".", grouping_mark = ","),
+    na = c("", "NA") # only true blanks are missing at this stage
+  )
+  names(raw) <- tolower(names(raw))
+  stopifnot(!anyNA(raw$researchid)) # every row must have an ID
+  dup_ids <- unique(raw$researchid[duplicated(raw$researchid)])
+  out <- raw[!raw$researchid %in% dup_ids, ]
+  attr(out, "duplicate_ids") <- dup_ids
+  attr(out, "duplicate_rows") <- sum(raw$researchid %in% dup_ids)
+  if (length(dup_ids) > 0) {
+    message(
+      "read_raw(): removed ", attr(out, "duplicate_rows"), " rows of ",
+      length(dup_ids), " ResearchIDs that occur more than once (C13)."
+    )
+  }
+  out
+}
+
 # ---- case-count thresholds for site-specific analyses ------------------------------
 
 # C12 (2026-10-14) Q: Minimum number of invasive SMNs of a site for it to get

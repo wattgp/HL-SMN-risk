@@ -92,24 +92,14 @@ library(lubridate)
 
 # ---- 1. read the raw export ----------------------------------------------------
 
-# The export is semicolon-delimited (see 01_clean-data.R). All columns are
-# read as character on purpose: the chemotherapy codes have different
-# missing-value codes per variable (e.g. regimen code 99 is a real regimen,
-# "CCNU / VP-16", and 777 means "other chemotherapy"), so the blanket
-# "set 99/777/999 to NA in every numeric column" used in 01_clean-data.R
-# would destroy real information here. Each variable is recoded explicitly
-# below, following the codebook.
-raw <- read_delim(
-  raw_file,
-  delim = ";",
-  col_types = cols(.default = col_character()),
-  locale = locale(decimal_mark = ".", grouping_mark = ","),
-  na = c("", "NA") # only true blanks are missing at this stage
-)
-
-# Lower-case names so that e.g. "Smn2_site" and "smn2_site" are the same
-# (the codebook and the export are not consistent in capitalisation).
-names(raw) <- tolower(names(raw))
+# read_raw() (00_config.R) reads all columns as character on purpose: the
+# chemotherapy codes have different missing-value codes per variable (e.g.
+# regimen code 99 is a real regimen, "CCNU / VP-16", and 777 means "other
+# chemotherapy"), so a blanket "set 99/777/999 to NA in every numeric
+# column" would destroy real information. Each variable is recoded
+# explicitly below, following the codebook. Patients with a duplicated
+# ResearchID are removed (C13 in 00_config.R).
+raw <- read_raw()
 
 # ---- 2. helper functions ---------------------------------------------------------
 

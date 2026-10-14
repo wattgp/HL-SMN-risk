@@ -15,8 +15,11 @@ Beatriz Torrinha (r)
   approval by Berthe before any RT results are reported. See
   `docs/proposal_exposure-definitions.md` (section 1), `scripts/03_rt-exposure.R`
   (section 4) and `scripts/01_clean-data.R` (section 6).
-- [ ] **Age groups for the descriptive table**: scenarios are printed by
-  `01_clean-data.R`; choice pending.
+- [x] **Age groups for the descriptive table** (2026-10-14): 15-20 / 21-30 /
+  31-40 / 41-50. The two-group split for the "young adult vs older" plots is
+  still open.
+- [ ] **25 duplicated ResearchIDs** in the real export are excluded for now
+  (C13 in `00_config.R`). Ask the data manager which record is authoritative.
 - [ ] **Analysis stage** (descriptive table, cumulative incidence, models,
   figures): not started. `scripts/SMN-risk.qmd` uses the old variable names
   and will be rewritten.

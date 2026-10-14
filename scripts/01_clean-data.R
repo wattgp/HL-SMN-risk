@@ -86,6 +86,16 @@
 # P9 An invasive SMN with an unknown date cannot be placed in time: the
 #    patient is excluded from the analytic cohort and listed for review.
 #
+# C13 (2026-10-14) Duplicated ResearchIDs (25 in the real export): all rows
+#    of these patients are excluded for now (option C). To do: ask the data
+#    manager which record is authoritative. Applied in read_raw() in
+#    00_config.R; counted first in the exclusion flow.
+# C14 (2026-10-14) Q: Invasive SMN diagnosed after the recorded last-contact
+#    date? A: Use the date of the invasive SMN as the last-contact date
+#    (section 7). The recorded date is kept as date_lc_recorded.
+# C15 (2026-10-14) Q: Age groups for the descriptive table? A: Scenario C:
+#    15-20 / 21-30 / 31-40 / 41-50 (completed years). The scenario table is
+#    still printed in section 11 for reference.
 # C11 (2026-10-14) Site groups (section 5): APPROVED as shown. Small site
 #    groups are NOT merged in the data: every group is kept in smn_long and
 #    outcome_site_long, and all groups appear in a comprehensive SMN table in
@@ -93,8 +103,8 @@
 #    are set in 00_config.R (C12 there).
 #
 # STILL OPEN:
-# - Age groups for the descriptive table (age_dx_group): scenarios shown
-#   (section 11); the draft below is a placeholder.
+# - Two-group age split for the "young adult vs older" cumulative incidence
+#   plots (SAP E.1): not yet chosen (scenario D, 15-29 / 30-50, suggested).
 
 source(here::here("scripts", "00_config.R"))
 
@@ -109,29 +119,26 @@ library(lubridate)
 
 # Each setting below implements one P-item from the decision log. Changing a
 # value here changes the behaviour everywhere it is used.
-p1_moved_abroad <- "censor"          # P1: "censor" at emigration date
-p2_death_after_lc <- "censor_at_lc"  # P2: death after last contact -> censor at last contact
-p3_missing_month <- 7L               # P3: month used when only the year is known (NA = leave missing)
-p4_exclude_prior_smn <- TRUE         # P4: exclude invasive SMN before start of follow-up
-p6_exclude_second_hl <- TRUE         # P6: second HL is not an SMN
-p7_age_upper_exclusive <- 51         # P7: age at diagnosis < 51
-p8_nmsc_morph <- 8000:8110           # P8: NMSC morphology codes on C44
-p9_exclude_undated_smn <- TRUE       # P9: exclude patients with an undated invasive SMN
+p1_moved_abroad <- "censor" # P1: "censor" at emigration date
+p2_death_after_lc <- "censor_at_lc" # P2: death after last contact -> censor at last contact
+p3_missing_month <- 7L # P3: month used when only the year is known (NA = leave missing)
+p4_exclude_prior_smn <- TRUE # P4: exclude invasive SMN before start of follow-up
+p6_exclude_second_hl <- TRUE # P6: second HL is not an SMN
+p7_age_upper_exclusive <- 51 # P7: age at diagnosis < 51
+p8_nmsc_morph <- 8000:8110 # P8: NMSC morphology codes on C44
+p9_exclude_undated_smn <- TRUE # P9: exclude patients with an undated invasive SMN
 
 # ---- 1. read the raw export ----------------------------------------------------
 
 # Every column is read as character and recoded explicitly below (C10).
-raw <- read_delim(
-  raw_file,
-  delim = ";",
-  col_types = cols(.default = col_character()),
-  locale = locale(decimal_mark = ".", grouping_mark = ","),
-  na = c("", "NA") # only true blanks are missing at this stage
-)
-# Lower-case names: the export and codebook mix capitalisation (Smn2_site).
-names(raw) <- tolower(names(raw))
+# read_raw() (00_config.R) also removes ALL rows of patients whose
+# ResearchID occurs more than once (C13); they are counted in the exclusion
+# flow (section 9).
+raw <- read_raw()
+n_duplicate_ids <- length(attr(raw, "duplicate_ids"))
 
-# One row per patient is expected (codebook: "one row per individual").
+# From here on there is one row per patient (codebook: "one row per
+# individual").
 stopifnot(!anyDuplicated(raw$researchid))
 
 # ---- 2. helper functions ---------------------------------------------------------
@@ -193,19 +200,22 @@ pat <- tibble(researchid = raw$researchid) |>
     imputed_month_dx = mid_month_imputed(raw$m_diagnose, raw$y_diagnose),
     imputed_month_lc = mid_month_imputed(raw$m_lcontact, raw$y_lcontact),
     imputed_month_vs = mid_month_imputed(raw$m_livedead, raw$y_livedead),
-
     year_dx = year(date_dx),
     age_dx = years_between(date_birth, date_dx),
 
     # Diagnosis era (C3). "before 1989" is outside the cohort (C1) but kept
     # so that excluded patients can be described.
     era = cut(year_dx, c(-Inf, 1988, 1994, 2004, Inf),
-              labels = c("before 1989", "1989-1994", "1995-2004", "2005-latest")),
+      labels = c("before 1989", "1989-1994", "1995-2004", "2005-latest")
+    ),
 
-    # Age groups for description (SAP: present age in categories). The
-    # cut-points are a DRAFT for the descriptive table (to be agreed).
-    age_dx_group = cut(age_dx, c(-Inf, 25, 35, Inf), right = FALSE,
-                       labels = c("<25", "25-34", ">=35")),
+    # Age groups for the descriptive table (C15, scenario C): completed
+    # years 15-20 / 21-30 / 31-40 / 41-50 (consistent with P7: ages are
+    # floored, so 50.9 is "41-50").
+    age_dx_group = cut(floor(age_dx), c(15, 21, 31, 41, 51),
+      right = FALSE,
+      labels = c("15-20", "21-30", "31-40", "41-50")
+    ),
 
     # Vital status (codebook): 0 alive, 1 dead, 2 moved abroad, 99 unknown.
     vital = case_when(
@@ -216,15 +226,19 @@ pat <- tibble(researchid = raw$researchid) |>
     ),
 
     # HL relapse (codebook): 0 no, 1 yes.
-    relapse = case_when(as_int(raw$recur) == 1L ~ "yes",
-                        as_int(raw$recur) == 0L ~ "no",
-                        TRUE ~ NA_character_),
+    relapse = case_when(
+      as_int(raw$recur) == 1L ~ "yes",
+      as_int(raw$recur) == 0L ~ "no",
+      TRUE ~ NA_character_
+    ),
 
     # Smoking ever (codebook): 0 no, 1 yes, 99 unknown -> NA. Unknown is
     # excluded (listwise) in the lung x smoking models (decision Q-RT3b).
-    smoke_ever = case_when(as_int(raw$smoke_ever) == 1L ~ "yes",
-                           as_int(raw$smoke_ever) == 0L ~ "no",
-                           TRUE ~ NA_character_),
+    smoke_ever = case_when(
+      as_int(raw$smoke_ever) == 1L ~ "yes",
+      as_int(raw$smoke_ever) == 0L ~ "no",
+      TRUE ~ NA_character_
+    ),
 
     # BMI at diagnosis (codebook: numeric, 99 unknown). Stored as text in
     # the export; values outside 10-80 are treated as missing.
@@ -344,8 +358,10 @@ smn_long <- smn_long |>
       site_group == "Colorectum" ~ "colorectum",
       site_group %in% c("Bladder", "Prostate", "Cervix") ~ "pelvic_organs",
       site_group == "Head and neck" ~ "head_neck",
-      site_group %in% c("Sarcoma (bone / soft tissue)", "Melanoma",
-                        "Non-melanoma skin (basal/squamous)", "Other skin") ~ "by_topography",
+      site_group %in% c(
+        "Sarcoma (bone / soft tissue)", "Melanoma",
+        "Non-melanoma skin (basal/squamous)", "Other skin"
+      ) ~ "by_topography",
       TRUE ~ "not_organ_specific"
     ),
     is_nmsc = site_group == "Non-melanoma skin (basal/squamous)",
@@ -417,11 +433,33 @@ first_any <- smn_long |>
     .groups = "drop"
   ) |>
   mutate(date_first_any_smn = if_else(is.finite(date_first_any_smn),
-                                      date_first_any_smn, as.Date(NA)))
+    date_first_any_smn, as.Date(NA)
+  ))
 
 pat <- pat |>
   left_join(first_any, by = "researchid") |>
   mutate(across(c(any_smn_undated, any_smn_before_fup), ~ coalesce(.x, FALSE)))
+
+# C14: an invasive SMN diagnosed AFTER the recorded last-contact date shows
+# the patient was in contact at least until then, so last contact is moved
+# to the date of the latest such SMN. "Invasive" = behaviour 3, any site
+# (including NMSC and a second HL, because any invasive diagnosis is a
+# contact). Only applied when last contact is known; the original date is
+# kept as date_lc_recorded.
+latest_inv_smn <- smn_long |>
+  filter(behav_cat == "invasive", !is.na(date_smn)) |>
+  group_by(researchid) |>
+  summarise(date_latest_inv_smn = max(date_smn), .groups = "drop")
+
+pat <- pat |>
+  left_join(latest_inv_smn, by = "researchid") |>
+  mutate(
+    date_lc_recorded = date_lc,
+    lc_moved_to_smn = !is.na(date_lc) & !is.na(date_latest_inv_smn) &
+      date_latest_inv_smn > date_lc,
+    date_lc = if_else(lc_moved_to_smn, date_latest_inv_smn, date_lc)
+  ) |>
+  select(-date_latest_inv_smn)
 
 # ---- 8. end of follow-up and competing-risk outcome (any invasive SMN) -----------
 
@@ -459,8 +497,9 @@ pat <- pat |>
     time_any = years_between(date_fup_start, date_exit_any),
     time_entry_dx = years_between(date_dx, date_fup_start), # = 5
     time_exit_dx_any = years_between(date_dx, date_exit_any),
-    # SMN diagnosed after the last-contact date: inconsistent; listed below.
-    smn_after_lc = !is.na(date_first_any_smn) & !is.na(date_lc) & date_first_any_smn > date_lc
+    # SMN diagnosed after the RECORDED last-contact date (last contact was
+    # moved to the SMN date, C14); counted below.
+    smn_after_lc = lc_moved_to_smn
   )
 
 # ---- 9. analytic cohort and exclusion flow ----------------------------------------
@@ -481,11 +520,19 @@ pat <- pat |>
     )
   )
 
-# Flow table: patients remaining after each step, in the order above.
+# Flow table: patients excluded at each step, in the order above. The
+# patients with a duplicated ResearchID (C13) were removed on reading, so
+# they are added here as the first step.
 exclusion_flow <- pat |>
   mutate(exclusion = coalesce(exclusion, "included in analytic cohort")) |>
   count(exclusion, name = "n") |>
+  bind_rows(tibble(
+    exclusion = "ResearchID on more than one row (C13)",
+    n = n_duplicate_ids
+  )) |>
+  filter(n > 0) |>
   mutate(order = match(exclusion, c(
+    "ResearchID on more than one row (C13)",
     "HL diagnosis year unknown", "HL diagnosed before 1989 (C1)",
     "age at diagnosis unknown", "age at diagnosis outside 15-50 (C1, P7)",
     "end of follow-up unknown", "died before start of follow-up (C2)",
@@ -505,8 +552,10 @@ cohort <- pat |> filter(is.na(exclusion))
 # competing event; censoring as for any SMN. NMSC is included as its own
 # site (C8). Sites are restricted to the analytic cohort.
 site_first <- smn_long |>
-  filter(counts_site_smn, smn_timing == "during follow-up",
-         researchid %in% cohort$researchid) |>
+  filter(
+    counts_site_smn, smn_timing == "during follow-up",
+    researchid %in% cohort$researchid
+  ) |>
   group_by(researchid, site_group, rt_site) |>
   summarise(date_first_site = min(date_smn), .groups = "drop")
 
@@ -517,8 +566,10 @@ site_list <- sort(unique(site_first$site_group))
 # whether NMSC should count is a modelling choice to make at that stage
 # (other_smn_is_nmsc_only flags it).
 other_smn <- smn_long |>
-  filter(counts_site_smn, smn_timing == "during follow-up",
-         researchid %in% cohort$researchid) |>
+  filter(
+    counts_site_smn, smn_timing == "during follow-up",
+    researchid %in% cohort$researchid
+  ) |>
   select(researchid, other_site = site_group, date_smn, is_nmsc)
 
 outcome_site_long <- cohort |>
@@ -564,18 +615,24 @@ print(exclusion_flow)
 
 cat("\n== Any invasive SMN outcome, analytic cohort (1 SMN, 2 death, 0 censored) ==\n")
 print(count(cohort, status_any))
-cat("Follow-up (years since start of follow-up): median",
-    round(median(cohort$time_any, na.rm = TRUE), 1), " max",
-    round(max(cohort$time_any, na.rm = TRUE), 1), "\n")
+cat(
+  "Follow-up (years since start of follow-up): median",
+  round(median(cohort$time_any, na.rm = TRUE), 1), " max",
+  round(max(cohort$time_any, na.rm = TRUE), 1), "\n"
+)
 
 cat("\n== Vital status (moved abroad: P1) ==\n")
 print(count(pat, vital))
-cat("Deaths after last contact, censored at last contact (P2):",
-    sum(pat$vital %in% "dead" & !pat$death_competing, na.rm = TRUE), "\n")
+cat(
+  "Deaths after last contact, censored at last contact (P2):",
+  sum(pat$vital %in% "dead" & !pat$death_competing, na.rm = TRUE), "\n"
+)
 
 cat("\n== Dates with imputed month (P3) ==\n")
-print(c(dx = sum(pat$imputed_month_dx), lc = sum(pat$imputed_month_lc),
-        vs = sum(pat$imputed_month_vs), smn = sum(smn_long$imputed_month_smn)))
+print(c(
+  dx = sum(pat$imputed_month_dx), lc = sum(pat$imputed_month_lc),
+  vs = sum(pat$imputed_month_vs), smn = sum(smn_long$imputed_month_smn)
+))
 
 cat("\n== SMN behaviour categories (all recorded SMNs) ==\n")
 print(count(smn_long, behav_cat))
@@ -583,8 +640,10 @@ print(count(smn_long, behav_cat))
 cat("\n== Site groups: invasive SMNs during follow-up, analytic cohort ==\n")
 print(
   smn_long |>
-    filter(researchid %in% cohort$researchid, behav_cat == "invasive",
-           smn_timing == "during follow-up") |>
+    filter(
+      researchid %in% cohort$researchid, behav_cat == "invasive",
+      smn_timing == "during follow-up"
+    ) |>
     count(site_group, sort = TRUE),
   n = Inf
 )
@@ -605,9 +664,13 @@ age_scenarios <- list(
 )
 age_scenario_table <- imap_dfr(age_scenarios, function(brks, name) {
   cohort |>
-    mutate(age_c = floor(age_dx),
-           group = cut(age_c, brks, right = FALSE,
-                       labels = paste0(head(brks, -1), "-", tail(brks, -1) - 1))) |>
+    mutate(
+      age_c = floor(age_dx),
+      group = cut(age_c, brks,
+        right = FALSE,
+        labels = paste0(head(brks, -1), "-", tail(brks, -1) - 1)
+      )
+    ) |>
     group_by(group) |>
     summarise(n = n(), smn = sum(status_any == 1L, na.rm = TRUE), .groups = "drop") |>
     mutate(pct = round(100 * n / sum(n), 1), scenario = name, .before = 1)
@@ -617,10 +680,13 @@ print(age_scenario_table, n = Inf)
 saveRDS(age_scenario_table, file.path(out_dir, "age_group_scenarios.Rds"))
 
 cat("\n== Records to review ==\n")
-cat("invasive SMN diagnosed after last contact:", sum(pat$smn_after_lc), "\n")
+cat("invasive SMN after recorded last contact (last contact moved to SMN date, C14):",
+    sum(pat$smn_after_lc), "\n")
 cat("invasive SMN with unknown date:", sum(pat$any_smn_undated), "\n")
-cat("topography not in C00.0-C80.9 format:",
-    sum(!is.na(smn_long$topo_raw) & is.na(smn_long$topo)), "\n")
+cat(
+  "topography not in C00.0-C80.9 format:",
+  sum(!is.na(smn_long$topo_raw) & is.na(smn_long$topo)), "\n"
+)
 
 # ---- 12. save ----------------------------------------------------------------------
 
@@ -630,5 +696,7 @@ saveRDS(cohort, file.path(out_dir, "analytic_cohort.Rds"))
 saveRDS(outcome_site_long, file.path(out_dir, "outcome_site_long.Rds"))
 saveRDS(exclusion_flow, file.path(out_dir, "exclusion_flow.Rds"))
 
-message("Saved ", nrow(pat), " patients (all) and ", nrow(cohort),
-        " (analytic cohort) to ", out_dir)
+message(
+  "Saved ", nrow(pat), " patients (all) and ", nrow(cohort),
+  " (analytic cohort) to ", out_dir
+)
