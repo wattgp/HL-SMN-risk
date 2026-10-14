@@ -76,6 +76,7 @@ Agreed with the project leader; the analysis script must include each one.
 | C17-LC | End of follow-up at **last contact** (earlier rule: emigration censored, death after last contact censored at last contact) | End at the last date of any data | `date_end_obs_lc`, `death_competing_lc` (01) |
 | Q-RT1 | Organ exposure **binary** (in field vs not) | 0 / 1 / 2 | organ exposure (03, 04) |
 | R4-era | Diagnosis **era** as a surrogate for RT dose | – | `era` (01) |
+| R7 | **Parallel analysis with the codebook RT categories** (`rtcatprim`, `rtsupraprim`, `rtmidprim`, `rtinfraprim`, `rtneckprim`, `rtmedprim`; defined with radiation oncologists) | Field-flag-based organ exposure and RT technique | `rt_*_cb` (03 per course; 04 combined over primary and follow-up courses) |
 | Q-CT1 B | **Doxorubicin-equivalent** dose (Feijen 2019; COG ratios as a further check) | Doxorubicin dose + epirubicin yes/no | `doxo_eq_feijen_dose`, `doxo_eq_cog_dose` (02, 04) |
 | Q-CT6 | **Finer doxorubicin** categories 0 / 1-200 / 201-349 / >=350 | 0 / 1-200 / >200 | `doxo_cat_fine` (04) |
 | S-CT98 | ChlVPP/ABV procarbazine **700** mg/m2 per cycle | 1000 per cycle | `procarb_dose_s98`, `procarb_cat_s98` (02, 04) |
@@ -142,6 +143,9 @@ use_dummy <- FALSE  # real export   -> secure_data/intermediate/
 ```
 
 Only the project leader sets `use_dummy <- FALSE`, after reviewing the code.
+Setting the environment variable `HLSMN_FORCE_DUMMY=1` forces the dummy data
+whatever the switch says (used for testing code; it can never force the real
+data).
 Dummy and real derived files go to separate folders, so they cannot be mixed
 up.
 
@@ -157,6 +161,17 @@ output of 01-03):
 | 3 | `scripts/03_rt-exposure.R` | RT field flags -> organ exposure (0/1/2) per SMN site, RT technique, mediastinal, pelvic, supra-/infradiaphragmatic RT; descriptive tables of recorded RT doses. Per course, with start dates. | `rt_fields_course.Rds`, `rt_organ_course.Rds`, `rt_dose_description.Rds` |
 | 4 | `scripts/04_exposure-window.R` | Joins 1-3. Places each treatment course in time (missing dates: rules W1-W3); baseline (fixed) exposure at the start of follow-up and time-varying exposure after it; dose categories; ovarian damage; sarcoma/skin SMNs matched to RT fields by body region (descriptive). | `exposure_baseline.Rds`, `exposure_tv.Rds`, `course_timing.Rds`, `smn_field_match.Rds` |
 | 5 | *(to do)* analysis | Descriptive table (gtsummary), cumulative incidence with death as competing risk, multivariable models, exploratory ML for breast cancer, figures. Replaces `SMN-risk.qmd`. | `output/` |
+
+Run the whole pipeline in one go, with a log per script:
+
+```r
+source(here::here("scripts", "run_all.R"))
+```
+
+Logs are saved (git-ignored) to `secure_data/intermediate/logs/` (real data)
+or `secure_data/intermediate/dummy/logs/` (dummy data), one time-stamped file
+per script, with all checks and the `OK:` / `ACTION:` advice. Or run the
+scripts one by one:
 
 ```r
 source(here::here("scripts", "01_clean-data.R"))
@@ -182,6 +197,7 @@ scripts/
   02_chemo-doses.R                 chemotherapy regimens -> doses and yes/no exposure
   03_rt-exposure.R                 RT field flags -> organ exposure, RT technique
   04_exposure-window.R             baseline and time-varying exposure for the analytic cohort
+  run_all.R                        runs 01-04 in order, with a log per script
   make_dummy_dataset.R             builds the synthetic dummy dataset from the real export
   SMN-risk.qmd                     OLD analysis file (old variable names; to be replaced)
   anthra_dose_Eline.R              old anthracycline dose code (reference only; different coding)

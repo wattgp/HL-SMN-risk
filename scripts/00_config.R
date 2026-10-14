@@ -15,7 +15,13 @@ library(here)
 #         any other data").
 # FALSE = the real export. Only the project leader (G. Watt) flips this, after
 #         reviewing the code, to produce the final results.
-use_dummy <- TRUE
+use_dummy <- FALSE
+
+# Safety override for code testing: if the environment variable
+# HLSMN_FORCE_DUMMY is set (to anything), the dummy data are used whatever
+# the line above says. It can only force the dummy data, never the real data.
+# (Used by Claude when testing code, so a test can never touch the real data.)
+if (nzchar(Sys.getenv("HLSMN_FORCE_DUMMY"))) use_dummy <- TRUE
 
 # Raw input file. The real export is read-only and is never modified.
 raw_file <- if (use_dummy) {
@@ -111,7 +117,8 @@ doxo_cat_fine <- function(mg) {
 # Procarbazine: 0 / <=4.2 / 4.3-8.4 / >8.4 g/m2.
 procarb_cat <- function(mg) {
   cut(mg / 1000, c(-Inf, 0, 4.2, 8.4, Inf),
-      labels = c("0", "<=4.2", "4.3-8.4", ">8.4"))
+    labels = c("0", "<=4.2", "4.3-8.4", ">8.4")
+  )
 }
 # "High" procarbazine for the breast-cancer ovarian-damage modifier
 # (decision Q-RT3a): > 4.2 g/m2.

@@ -106,6 +106,10 @@
 #    earlier last-contact rule is kept for a sensitivity analysis
 #    (date_end_obs_lc, death_competing_lc). The project leader asked that
 #    the analysis script MUST include this sensitivity analysis (C17-LC).
+# C18 (2026-10-14) Q: SMNs coded behaviour 9 ("malignant, unknown whether
+#    primary or metastatic")? A: Count them as INVASIVE SMNs (is_invasive).
+#    SMNs with NO behaviour code are not counted; a check lists how many have
+#    a site and a date during follow-up, for review.
 # C11 (2026-10-14) Site groups (section 5): APPROVED as shown. Small site
 #    groups are NOT merged in the data: every group is kept in smn_long and
 #    outcome_site_long, and all groups appear in a comprehensive SMN table in
@@ -302,7 +306,10 @@ smn_long <- map_dfr(1:7, function(k) {
       behav == 6L ~ "metastatic",
       behav == 9L ~ "malignant, primary/metastatic unknown",
       TRUE ~ "unknown"
-    )
+    ),
+    # C18: counted as an INVASIVE SMN = behaviour 3, or behaviour 9
+    # ("malignant, unknown whether primary or metastatic").
+    is_invasive = behav %in% c(3L, 9L)
   )
 
 # ---- 5. SMN site groups (C7, approved C11) ------------------------------------------
@@ -381,14 +388,14 @@ smn_long <- smn_long |>
     ),
     is_nmsc = site_group == "Non-melanoma skin (basal/squamous)",
 
-    # Counts as an invasive SMN for "any SMN" (C6, C8, P6): behaviour 3,
+    # Counts as an invasive SMN for "any SMN" (C6, C8, C18, P6): behaviour 3 or 9,
     # not NMSC, not a second HL. C80.9 counts only if invasive (C8), which
     # the behaviour condition already ensures.
-    counts_any_smn = behav_cat == "invasive" & !is_nmsc &
+    counts_any_smn = is_invasive & !is_nmsc &
       !(p6_exclude_second_hl & site_group == "Hodgkin lymphoma"),
     # Counts as an invasive SMN for its own site group (NMSC included here,
     # as its own site, C8).
-    counts_site_smn = behav_cat == "invasive" &
+    counts_site_smn = is_invasive &
       !(p6_exclude_second_hl & site_group == "Hodgkin lymphoma")
   )
 
@@ -462,7 +469,7 @@ pat <- pat |>
 # contact). Only applied when last contact is known; the original date is
 # kept as date_lc_recorded.
 latest_inv_smn <- smn_long |>
-  filter(behav_cat == "invasive", !is.na(date_smn)) |>
+  filter(is_invasive, !is.na(date_smn)) |>
   group_by(researchid) |>
   summarise(date_latest_inv_smn = max(date_smn), .groups = "drop")
 
@@ -679,8 +686,20 @@ cat("Records with data dated after the death date (C17; to review):",
 
 cat("\n== Source of the last data date (C17), analytic cohort ==\n")
 print(count(cohort, last_data_source))
-cat("Median extra follow-up vs the last-contact rule (years):",
-    round(median(years_between(cohort$date_end_obs_lc, cohort$date_end_obs), na.rm = TRUE), 2), "\n")
+extra <- years_between(cohort$date_end_obs_lc, cohort$date_end_obs)
+extended <- !is.na(extra) & extra > 0
+cat("Patients whose follow-up is LONGER than under the last-contact rule (C17-LC):",
+    sum(extended), "of", nrow(cohort), "\n")
+if (any(extended)) {
+  cat("Extra follow-up among them (years): median", round(median(extra[extended]), 1),
+      "| IQR", paste(round(quantile(extra[extended], c(0.25, 0.75)), 1), collapse = "-"),
+      "| max", round(max(extra[extended]), 1),
+      "| total extra person-years", round(sum(extra[extended])), "of",
+      round(sum(cohort$time_any, na.rm = TRUE)), "\n")
+  cat("ACTION: if the extra person-years are a sizeable share of the total, the",
+      "sensitivity analysis C17-LC (end at last contact) is important; report",
+      "both.\n")
+}
 
 cat("\n== Dates with imputed month (P3) ==\n")
 print(c(
@@ -689,13 +708,36 @@ print(c(
 ))
 
 cat("\n== SMN behaviour categories (all recorded SMNs) ==\n")
-print(count(smn_long, behav_cat))
+print(count(smn_long, behav_cat, counted_as_invasive = is_invasive))
+
+# C18 check: SMNs with NO behaviour code are not counted. How many look like
+# real SMNs (site recorded, dated during follow-up, in the analytic cohort)?
+no_behav <- smn_long |>
+  filter(behav_cat == "unknown", researchid %in% cohort$researchid)
+cat("\nSMNs without a behaviour code, analytic cohort:", nrow(no_behav), "\n")
+print(count(no_behav, site_recorded = !is.na(topo), smn_timing))
+n_review <- sum(!is.na(no_behav$topo) & no_behav$smn_timing == "during follow-up")
+cat(if (n_review > 0) paste0("ACTION: ", n_review, " SMN(s) with a site and a date during ",
+    "follow-up have no behaviour code and are NOT counted. Their site groups are ",
+    "below; ask the data manager for the behaviour code, or agree a rule with the ",
+    "project leader (e.g. malignant morphology + site = invasive).")
+    else "OK: no undated/unknown-behaviour SMNs during follow-up need review.", "\n")
+if (n_review > 0) {
+  print(count(filter(no_behav, !is.na(topo), smn_timing == "during follow-up"),
+              site_group, sort = TRUE), n = Inf)
+}
+
+cat("\n== Topography values not in C00.0-C80.9 format (shown as recorded) ==\n")
+bad_topo <- smn_long |> filter(!is.na(topo_raw), is.na(topo)) |> count(topo_raw, sort = TRUE)
+print(bad_topo, n = Inf)
+cat(if (nrow(bad_topo) > 0) "ACTION: fix these values in the source or add a recode rule; these SMNs get no site group.\n"
+    else "OK: all topographies are in C00.0-C80.9 format.\n")
 
 cat("\n== Site groups: invasive SMNs during follow-up, analytic cohort ==\n")
 print(
   smn_long |>
     filter(
-      researchid %in% cohort$researchid, behav_cat == "invasive",
+      researchid %in% cohort$researchid, is_invasive,
       smn_timing == "during follow-up"
     ) |>
     count(site_group, sort = TRUE),

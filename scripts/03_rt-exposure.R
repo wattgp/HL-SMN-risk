@@ -58,6 +58,37 @@
 # R5 (2026-10-14) Q: How to use rt*_dosistot / rt*_dose1-5? A: Describe the
 #    recorded doses against RT technique and era in a table; not in models.
 # R6 (2026-10-13) Diagnosis eras: 1989-1994, 1995-2004, 2005-latest.
+# R7 (2026-10-14) Q: Use the RT categories already in the export
+#    (rtsupra, rtmid, rtinfra, rtneck, rtmed, rtcat per course)? A: Yes.
+#    They were defined with radiation oncologists and are kept, unchanged,
+#    as a PARALLEL classification (variables *_cb, section 3b), for a
+#    parallel analysis next to the field-flag-based variables.
+# R8 (2026-10-14) Q: Use the free-text field names recorded with the doses
+#    (rtprim_field1-5, rtfup2_field1-3, *_surdos_fields)? A: Yes:
+#    incorporate them into the field classification by hand (mapping table,
+#    section 2a). The values seen in the real data on 2026-10-14 were:
+#    mediastinum; neck L+R; other; paraaortal + spleen; axilla L; neck L;
+#    neck R; paraaortal; spleen; supraclavicular L+R; axilla L+R; axilla R;
+#    axilla R + mediastinum; inguinal L; lower mediastinum; lung L; lung R;
+#    supraclavicular L; upper mediastinum.
+# R8a (2026-10-14) Real data: the boost-field text often lists several
+#    fields separated by commas; each item is now mapped on its own. Three
+#    terms were added: "inguinal R", "lung L+R", and "middle mediastinum"
+#    (no flag of its own -> the mediastinum flag, part unspecified).
+# R9 (2026-10-14) Q: The involved-node flag is usually recorded TOGETHER
+#    with named regional fields (1,275 primary courses in the real data);
+#    does invnode mean the involved-node technique or "the involved nodes
+#    were irradiated"? A: Cannot be determined; use the approach with the
+#    fewest assumptions: classify by the named fields that were recorded
+#    (unchanged: regional field wins over the involved-node flag; R1a), and
+#    keep the involved-node flag itself as a separate variable (invnode)
+#    so it can be described next to rt_technique.
+# T1 (2026-10-14) Q: Text names a field whose flag is 0 or unknown? A: The
+#    TEXT OVERRIDES the flag (option b): a field named in the free text sets
+#    that field flag to 1, whether the flag was 0 or unknown (a field
+#    recorded with its own dose is strong evidence it was irradiated). The
+#    number of overridden 0 flags is printed. A named field also means RT
+#    was given in that course when rt<course> is unknown.
 
 source(here::here("scripts", "00_config.R"))
 
@@ -103,6 +134,89 @@ any01 <- function(...) {
   as.integer(out)
 }
 
+# ---- 2a. free-text field names -> field flags (R8) --------------------------------
+
+# T1 (decided 2026-10-14): "text_overrides" = a field named in the text sets
+# the flag to 1 whether it was 0 or unknown. ("fill_unknown_only" would only
+# fill unknown flags.)
+t1_text_rule <- "text_overrides"
+
+# Free-text columns per course. The first follow-up course has only the
+# boost ("surdosage") field text.
+text_cols <- list(
+  prim = c(paste0("rtprim_field", 1:5), "rtprim_surdos_fields"),
+  fup  = c("rtfup_surdos_fields"),
+  fup2 = c(paste0("rtfup2_field", 1:3), "rtfup2_surdos_fields")
+)
+
+# Hand-made mapping (R8): free text (lower case, single spaces) -> the field
+# flag stems it names (stem + course suffix = export column, e.g. "laxil" ->
+# laxilprim). Side is kept where the text gives it; "L+R" sets both sides.
+field_text_map <- tribble(
+  ~text,                     ~stems,
+  "mediastinum",             c("mediast"),
+  "upper mediastinum",       c("uppmedias"),
+  "lower mediastinum",       c("lowmedias"),
+  "neck l",                  c("lneck"),
+  "neck r",                  c("rneck"),
+  "neck l+r",                c("lneck", "rneck"),
+  "supraclavicular l",       c("lsupra"),
+  "supraclavicular r",       c("rsupra"),
+  "supraclavicular l+r",     c("lsupra", "rsupra"),
+  "axilla l",                c("laxil"),
+  "axilla r",                c("raxil"),
+  "axilla l+r",              c("laxil", "raxil"),
+  "axilla r + mediastinum",  c("raxil", "mediast"),
+  "lung l",                  c("llung"),
+  "lung r",                  c("rlung"),
+  "paraaortal",              c("paraa"),
+  "spleen",                  c("spleen"),
+  "paraaortal + spleen",     c("paraa", "spleen"),
+  "inguinal l",              c("lingui"),
+  "inguinal r",              c("ringui"),                 # R8a
+  "lung l+r",                c("llung", "rlung"),         # R8a
+  "middle mediastinum",      c("mediast"),                # R8a: no own flag -> mediastinum, part unspecified
+  "other",                   c("other")
+)
+
+text_long <- imap_dfr(text_cols, function(cols, crs) {
+  cols <- intersect(cols, names(raw))
+  if (!length(cols)) return(NULL)
+  raw |>
+    select(researchid, all_of(cols)) |>
+    pivot_longer(-researchid, names_to = "text_col", values_to = "text_raw") |>
+    filter(!is.na(text_raw), str_trim(text_raw) != "") |>
+    mutate(course = crs,
+           text = str_squish(str_to_lower(text_raw)),
+           text = str_replace_all(text, "\\s*\\+\\s*", " + "),
+           text = str_replace_all(text, "l \\+ r", "l+r")) |>
+    # R8a: an entry can list several fields separated by commas, e.g.
+    # "neck l, neck r, mediastinum": each item is mapped on its own.
+    separate_rows(text, sep = ",") |>
+    mutate(text = str_squish(text)) |>
+    filter(text != "")
+})
+if (is.null(text_long)) {
+  text_long <- tibble(researchid = character(), text_col = character(),
+                      text_raw = character(), course = character(), text = character())
+}
+
+# Field flags named in the text: one row per patient x course x stem.
+text_named <- text_long |>
+  inner_join(field_text_map, by = "text") |>
+  select(researchid, course, stems) |>
+  unnest(stems) |>
+  distinct(researchid, course, stem = stems)
+text_keys <- paste(text_named$researchid, text_named$course, text_named$stem)
+
+# Courses with any free-text field (mapped or not): RT was given.
+text_course_keys <- unique(paste(text_long$researchid, text_long$course))
+
+# Unmapped text values, to add to the mapping table by hand.
+text_unmapped <- text_long |>
+  anti_join(field_text_map, by = "text") |>
+  count(text, sort = TRUE)
+
 # ---- 2. field groups per course --------------------------------------------------
 
 # Each course has the same set of field flags with a suffix: "prim", "fup",
@@ -110,9 +224,17 @@ any01 <- function(...) {
 # left / right / side-unspecified flags of one anatomical region.
 courses <- c("prim", "fup", "fup2")
 
+# Field flag for one stem and course, with the free text applied (R8, T1).
 col <- function(stem, course) {
   nm <- paste0(stem, course)
-  if (nm %in% names(raw)) flag01(raw[[nm]]) else rep(NA_integer_, nrow(raw))
+  f <- if (nm %in% names(raw)) flag01(raw[[nm]]) else rep(NA_integer_, nrow(raw))
+  named <- paste(raw$researchid, course, stem) %in% text_keys
+  if (t1_text_rule == "text_overrides") {
+    f[named] <- 1L
+  } else {
+    f[named & is.na(f)] <- 1L
+  }
+  f
 }
 
 field_groups_for <- function(course) {
@@ -122,6 +244,8 @@ field_groups_for <- function(course) {
     course = c_,
     # RT given in this course (0/1/9 -> 0/1/NA)
     rt_given = flag01(raw[[paste0("rt", c_)]]),
+    # R8: a free-text field for this course means RT was given.
+    rt_given_text = paste(raw$researchid, c_) %in% text_course_keys,
     rt_start = mid_month_date(raw[[paste0("m_rt", c_)]], raw[[paste0("y_rt", c_)]]),
     mantle      = col("mantle", c_),
     invy        = col("invy", c_),       # inverted Y
@@ -147,8 +271,15 @@ field_groups_for <- function(course) {
     #   rtinfra / rtmid: 0 none, 1 yes, 9 RT field unknown
     rtsupra_code = suppressWarnings(as.integer(raw[[paste0("rtsupra", c_)]])),
     rtinfra_code = suppressWarnings(as.integer(raw[[paste0("rtinfra", c_)]])),
-    rtmid_code   = suppressWarnings(as.integer(raw[[paste0("rtmid", c_)]]))
-  )
+    rtmid_code   = suppressWarnings(as.integer(raw[[paste0("rtmid", c_)]])),
+    #   rtneck: 0 none, 1 supraclavicular only, 2 neck, 3 full mantle, 9 unknown
+    #   rtmed: 0 none, 1 mediastinal, 9 unknown
+    #   rtcat: 0-6 (see section 3b), 9 RT field unknown
+    rtneck_code  = suppressWarnings(as.integer(raw[[paste0("rtneck", c_)]])),
+    rtmed_code   = suppressWarnings(as.integer(raw[[paste0("rtmed", c_)]])),
+    rtcat_code   = suppressWarnings(as.integer(raw[[paste0("rtcat", c_)]]))
+  ) |>
+    mutate(rt_given = if_else(is.na(rt_given) & rt_given_text, 1L, rt_given))
 }
 
 fields <- map_dfr(courses, field_groups_for)
@@ -223,6 +354,33 @@ fields <- fields |>
                          TRUE ~ NA_integer_)
   )
 
+# ---- 3b. codebook RT categories, unchanged (R7, parallel classification) -------
+
+# The export's own categories, defined with radiation oncologists, as
+# labelled factors. Code 9 ("radiotherapy, but field unknown") is kept as its
+# own level, not set to missing; codes outside the codebook -> NA.
+cb_factor <- function(x, codes, labels) {
+  factor(x, levels = codes, labels = labels)
+}
+fields <- fields |>
+  mutate(
+    rt_cat_cb = cb_factor(rtcat_code, c(0:6, 9), c(
+      "no RT", "incomplete mantle, supra only",
+      "incomplete mantle + infra/mid-body", "full mantle only",
+      "full mantle + infra/mid-body", "infra/mid-body only", "other RT",
+      "RT, field unknown")),
+    rt_supra_cb = cb_factor(rtsupra_code, c(0, 1, 2, 9), c(
+      "none", "incomplete mantle", "full mantle", "RT, field unknown")),
+    rt_mid_cb = cb_factor(rtmid_code, c(0, 1, 9), c(
+      "none", "mid-body (para-aortic/spleen)", "RT, field unknown")),
+    rt_infra_cb = cb_factor(rtinfra_code, c(0, 1, 9), c(
+      "none", "infradiaphragmatic", "RT, field unknown")),
+    rt_neck_cb = cb_factor(rtneck_code, c(0, 1, 2, 3, 9), c(
+      "none", "supraclavicular only", "neck", "full mantle", "RT, field unknown")),
+    rt_med_cb = cb_factor(rtmed_code, c(0, 1, 9), c(
+      "none", "mediastinal", "RT, field unknown"))
+  )
+
 # ---- 4. field-to-organ mapping (R2, DRAFT pending Berthe's approval) -----------
 
 # One row per SMN site group. in_field / bordering list the field groups from
@@ -290,6 +448,27 @@ print(count(fields, course, invnode_with_regional))
 
 cat("\n== Technique vs the export's derived codes (primary course) ==\n")
 print(count(filter(fields, course == "prim"), rt_technique, rtsupra_code))
+
+cat("\n== Free-text field names (R8) ==\n")
+cat("free-text entries:", nrow(text_long), "| mapped:",
+    nrow(semi_join(text_long, field_text_map, by = "text")), "\n")
+cat("Unmapped values (add to field_text_map by hand):\n")
+print(text_unmapped, n = Inf)
+# Disagreement: text names a field whose flag is recorded as 0 (T1).
+recorded_flag <- function(id, crs, stem) {
+  nm <- paste0(stem, crs)
+  if (!nm %in% names(raw)) return(NA_integer_)
+  flag01(raw[[nm]][match(id, raw$researchid)])
+}
+text_disagree <- text_named |>
+  mutate(flag_recorded = unlist(pmap(list(researchid, course, stem), recorded_flag)) %||%
+           integer(0))
+cat("Text-named fields whose flag is: 1 =", sum(text_disagree$flag_recorded %in% 1L),
+    "| unknown (set to 1, T1) =", sum(is.na(text_disagree$flag_recorded)),
+    "| 0 (overridden to 1, T1) =", sum(text_disagree$flag_recorded %in% 0L), "\n")
+
+cat("\n== Codebook category (rt_cat_cb) vs field-flag technique, primary course (R7) ==\n")
+print(count(filter(fields, course == "prim"), rt_cat_cb, rt_technique), n = Inf)
 
 cat("\n== Organ exposure, primary course ==\n")
 print(
@@ -400,7 +579,9 @@ print(field_text, n = 30)
 saveRDS(
   fields |> select(researchid, course, rt_given, rt_start, all_of(field_group_names),
                    mediast_upp, mediast_gen, mediast_low, rt_technique,
-                   invnode_with_regional, rt_mediastinal, rt_pelvic, rt_supra, rt_infra),
+                   invnode_with_regional, rt_mediastinal, rt_pelvic, rt_supra, rt_infra,
+                   rt_cat_cb, rt_supra_cb, rt_mid_cb, rt_infra_cb, rt_neck_cb, rt_med_cb,
+                   rtcat_code, rtsupra_code, rtmid_code, rtinfra_code, rtneck_code, rtmed_code),
   file.path(out_dir, "rt_fields_course.Rds")
 )
 saveRDS(rt_organ, file.path(out_dir, "rt_organ_course.Rds"))
@@ -408,6 +589,7 @@ saveRDS(
   list(by_technique_era = dose_by_technique_era,
        completeness_era = dose_completeness_era,
        completeness_hospital = dose_completeness_hosp,
-       field_text = field_text),
+       field_text = field_text,
+       field_text_unmapped = text_unmapped),
   file.path(out_dir, "rt_dose_description.Rds")
 )

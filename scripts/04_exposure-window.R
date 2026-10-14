@@ -53,6 +53,29 @@
 #    highest level over courses; RT technique: largest volume; yes/no: "yes"
 #    if any course is yes - as proposed.)
 #
+# R7 (2026-10-14) Q: Parallel analysis with the export's own RT categories
+#    (rtcat, rtsupra, rtmid, rtinfra, rtneck, rtmed; defined with radiation
+#    oncologists): primary course only? A: No: use the primary AND follow-up
+#    courses. They follow the same windows as all other exposure (baseline
+#    before follow-up; courses during follow-up time-varying with the 2-year
+#    lag). Combination rules (section 3), APPROVED as proposed 2026-10-14:
+#    - rtsupra: full mantle > incomplete mantle > "RT, field unknown" > none
+#    - rtneck: full mantle > neck > supraclavicular only > unknown > none
+#    - rtmid, rtinfra, rtmed: yes > unknown > none
+#    - rtcat is RE-DERIVED from the combined components with the codebook
+#      definitions (1 incomplete mantle only, 2 incomplete mantle +
+#      infra/mid, 3 full mantle only, 4 full mantle + infra/mid, 5 infra/mid
+#      only, 6 other RT, 9 field unknown). The re-derivation is checked
+#      against the recorded rtcatprim for patients with primary RT only
+#      (check 7.4); if agreement is poor, revisit with the project leader.
+# CAP (2026-10-14) Q: Very high cumulative doses in the real data (e.g.
+#    procarbazine up to 28 g/m2 from 20 recorded MOPP cycles)? A: For the
+#    CONTINUOUS dose variables, cap the dose at a reasonable clinical
+#    threshold; the categorical variables use the uncapped dose (the top
+#    category absorbs extreme values). Cap values (section 0), CONFIRMED by
+#    the project leader 2026-10-14: doxorubicin 550 mg/m2 (commonly cited maximum lifetime
+#    cumulative doxorubicin dose) and procarbazine 11,200 mg/m2 (8 cycles of
+#    MOPP, the longest standard procarbazine-containing schedule).
 # W1 (2026-10-14) Q: Course with no start date? A: Approved. Primary course:
 #    assumed given at HL diagnosis (before follow-up). Follow-up course: the
 #    HL relapse date if known; otherwise assumed before the start of
@@ -62,6 +85,13 @@
 #    data, including treatment course dates (C17 in 01_clean-data.R). So a
 #    recorded course can no longer fall after the end of observation; the
 #    "after end of observation" window remains only as a safety check.
+# REG (2026-10-14) Q: Drug status "unknown" from the regimen codes while
+#    the export's own anthrac / procarbazine column says "no"? A: Trust the
+#    export's "no": unknown -> "no" and an unknown dose -> 0 (section 4-5,
+#    resolve_with_registry). Derived "yes"/"no" are never changed.
+# R2a (2026-10-14) Q: Sarcomas / melanomas that arose in an organ (e.g.
+#    breast angiosarcoma, C50) could not be matched to a body region. A: Use
+#    the organ mapping of that organ (section 6).
 # W5 (2026-10-14) Q: Sarcoma / skin body-region matching? A: Descriptive
 #    only: it shows how many of these SMNs arose in or next to an RT field.
 #    Cohort models for sarcoma and skin use any RT and RT technique.
@@ -77,6 +107,8 @@ library(lubridate)
 
 w1_missing_fup_date <- "relapse_date_else_baseline" # W1
 w3_lag_fup_treatment_years <- 2                      # W3: lag for courses starting during follow-up
+cap_doxo_mg <- 550        # CAP: continuous doxorubicin (and doxorubicin-equivalent) dose
+cap_procarb_mg <- 11200   # CAP: continuous procarbazine dose
 
 # ---- 1. inputs -------------------------------------------------------------------
 
@@ -186,12 +218,55 @@ technique_max <- function(x) {
   technique_levels[max(r)]
 }
 
+# R7: combine the codebook category codes over courses. Each helper takes
+# the course codes and returns one code: the highest-ranked known value;
+# NA only if no course has a known value.
+cb_combine <- function(x, order_high_to_low) {
+  for (code in order_high_to_low) if (any(x %in% code)) return(as.integer(code))
+  NA_integer_
+}
+cb_supra <- function(x) cb_combine(x, c(2, 1, 9, 0))    # full > incomplete > unknown > none
+cb_neck  <- function(x) cb_combine(x, c(3, 2, 1, 9, 0)) # mantle > neck > supraclav > unknown > none
+cb_yes   <- function(x) cb_combine(x, c(1, 9, 0))       # yes > unknown > none
+# rtcat re-derived from the combined components (codebook definitions).
+cb_cat <- function(supra, mid, infra, any_other6) {
+  below <- mid %in% 1L | infra %in% 1L
+  case_when(
+    supra %in% 2L & below ~ 4L,
+    supra %in% 2L ~ 3L,
+    supra %in% 1L & below ~ 2L,
+    supra %in% 1L ~ 1L,
+    supra %in% 0L & below ~ 5L,
+    any_other6 ~ 6L,
+    supra %in% 9L | mid %in% 9L | infra %in% 9L ~ 9L,
+    supra %in% 0L & mid %in% 0L & infra %in% 0L ~ 0L,
+    TRUE ~ NA_integer_
+  )
+}
+cb_labels <- list(
+  rt_cat_cb = c("no RT", "incomplete mantle, supra only",
+                "incomplete mantle + infra/mid-body", "full mantle only",
+                "full mantle + infra/mid-body", "infra/mid-body only", "other RT",
+                "RT, field unknown"),
+  rt_supra_cb = c("none", "incomplete mantle", "full mantle", "RT, field unknown"),
+  rt_mid_cb = c("none", "mid-body (para-aortic/spleen)", "RT, field unknown"),
+  rt_infra_cb = c("none", "infradiaphragmatic", "RT, field unknown"),
+  rt_neck_cb = c("none", "supraclavicular only", "neck", "full mantle", "RT, field unknown"),
+  rt_med_cb = c("none", "mediastinal", "RT, field unknown")
+)
+cb_codes <- list(rt_cat_cb = c(0:6, 9), rt_supra_cb = c(0, 1, 2, 9),
+                 rt_mid_cb = c(0, 1, 9), rt_infra_cb = c(0, 1, 9),
+                 rt_neck_cb = c(0, 1, 2, 3, 9), rt_med_cb = c(0, 1, 9))
+
 summarise_chemo <- function(df) {
   df |>
     summarise(
-      across(all_of(dose_vars), ~ dose_total(.x, course)),
+      # The "incomplete" flags MUST come before the totals: summarise()
+      # evaluates in order, so after the totals line doxo_dose etc. hold the
+      # one-number total instead of the per-course doses.
       across(all_of(dose_vars), ~ dose_incomplete(.x, course),
              .names = "{.col}_incomplete"),
+      across(all_of(dose_vars), ~ dose_total(.x, course)),
       doxo_any = yes_no_any(doxo_any),
       epirubicin_any = yes_no_any(epirubicin_any),
       other_anthra_any = yes_no_any(other_anthra_any),
@@ -209,8 +284,18 @@ summarise_rt <- function(df) {
       rt_supra = flag_any(rt_supra),
       rt_infra = flag_any(rt_infra),
       across(all_of(organ_cols), organ_max),
+      # R7: codebook categories combined over the courses in the window.
+      rtsupra_cb_code = cb_supra(rtsupra_code),
+      rtmid_cb_code = cb_yes(rtmid_code),
+      rtinfra_cb_code = cb_yes(rtinfra_code),
+      rtneck_cb_code = cb_neck(rtneck_code),
+      rtmed_cb_code = cb_yes(rtmed_code),
+      rtcat_any6 = any(rtcat_code %in% 6L),
       .groups = "drop"
-    )
+    ) |>
+    mutate(rtcat_cb_code = cb_cat(rtsupra_cb_code, rtmid_cb_code,
+                                  rtinfra_cb_code, rtcat_any6)) |>
+    select(-rtcat_any6)
 }
 
 # Derived variables from the summed exposure: categories and ovarian damage.
@@ -219,7 +304,17 @@ add_derived <- function(df) {
     mutate(
       doxo_cat = doxo_cat(doxo_dose),
       doxo_cat_fine = doxo_cat_fine(doxo_dose),
-      doxo_per100 = doxo_dose / 100, # continuous, per 100 mg/m2
+      # Continuous doses for models are CAPPED (decision CAP); categories
+      # below use the uncapped dose. *_capped flags which values were capped.
+      doxo_dose_capped = pmin(doxo_dose, cap_doxo_mg),
+      doxo_was_capped = doxo_dose > cap_doxo_mg,
+      doxo_per100 = doxo_dose_capped / 100, # continuous, per 100 mg/m2
+      doxo_eq_feijen_dose_capped = pmin(doxo_eq_feijen_dose, cap_doxo_mg),
+      doxo_eq_cog_dose_capped = pmin(doxo_eq_cog_dose, cap_doxo_mg),
+      procarb_dose_capped = pmin(procarb_dose, cap_procarb_mg),
+      procarb_was_capped = procarb_dose > cap_procarb_mg,
+      procarb_per1000 = procarb_dose_capped / 1000, # continuous, per g/m2
+      procarb_dose_s98_capped = pmin(procarb_dose_s98, cap_procarb_mg),
       procarb_cat = procarb_cat(procarb_dose),
       procarb_cat_s98 = procarb_cat(procarb_dose_s98),
       # R3: ovarian damage = pelvic RT OR procarbazine > 4.2 g/m2.
@@ -228,12 +323,47 @@ add_derived <- function(df) {
         rt_pelvic %in% 0L & procarb_dose <= procarb_high_mg ~ 0L,
         TRUE ~ NA_integer_
       ),
+      rt_cat_cb = factor(rtcat_cb_code, cb_codes$rt_cat_cb, cb_labels$rt_cat_cb),
+      rt_supra_cb = factor(rtsupra_cb_code, cb_codes$rt_supra_cb, cb_labels$rt_supra_cb),
+      rt_mid_cb = factor(rtmid_cb_code, cb_codes$rt_mid_cb, cb_labels$rt_mid_cb),
+      rt_infra_cb = factor(rtinfra_cb_code, cb_codes$rt_infra_cb, cb_labels$rt_infra_cb),
+      rt_neck_cb = factor(rtneck_cb_code, cb_codes$rt_neck_cb, cb_labels$rt_neck_cb),
+      rt_med_cb = factor(rtmed_cb_code, cb_codes$rt_med_cb, cb_labels$rt_med_cb),
       rt_technique = factor(rt_technique, levels = c(
         "no RT", "mantle / extended field",
         "regional field (presumed involved field)", "involved node",
         "RT, technique unknown"
       ))
     )
+}
+
+# REG (2026-10-14): the export's own "ever treated" columns (anthrac,
+# procarbazine) are trusted when they say "no". A drug status that is
+# "unknown" from the regimen codes (e.g. an unknown regimen) then becomes
+# "no", and the matching dose that is unknown becomes 0 (no such drug ever
+# given, so it adds nothing). A "yes" or "no" derived from the regimens is
+# never changed. anthrac = ANY anthracycline, so it resolves doxorubicin,
+# epirubicin and other anthracyclines.
+resolve_with_registry <- function(df) {
+  df |>
+    left_join(registry |> select(researchid, anthrac_registry, procarb_registry),
+              by = "researchid") |>
+    mutate(
+      no_anthra = anthrac_registry %in% "no",
+      no_procarb = procarb_registry %in% "no",
+      across(c(doxo_any, epirubicin_any, other_anthra_any),
+             ~ if_else(no_anthra & .x == "unknown", "no", .x)),
+      across(c(doxo_dose, doxo_eq_feijen_dose, doxo_eq_cog_dose),
+             ~ if_else(no_anthra & is.na(.x), 0, .x)),
+      across(c(doxo_dose_incomplete, doxo_eq_feijen_dose_incomplete,
+               doxo_eq_cog_dose_incomplete),
+             ~ if_else(no_anthra, FALSE, .x)),
+      procarb_any = if_else(no_procarb & procarb_any == "unknown", "no", procarb_any),
+      across(c(procarb_dose, procarb_dose_s98), ~ if_else(no_procarb & is.na(.x), 0, .x)),
+      across(c(procarb_dose_incomplete, procarb_dose_s98_incomplete),
+             ~ if_else(no_procarb, FALSE, .x))
+    ) |>
+    select(-no_anthra, -no_procarb, -anthrac_registry, -procarb_registry)
 }
 
 # ---- 4-5. baseline and time-varying exposure for a given lag (D5, W3) --------------
@@ -272,6 +402,7 @@ build_exposure <- function(lag_years) {
     select(researchid) |>
     left_join(base_chemo, by = "researchid") |>
     left_join(base_rt, by = "researchid") |>
+    resolve_with_registry() |> # REG
     add_derived() |>
     left_join(tv_flags, by = "researchid") |>
     left_join(registry, by = "researchid") |>
@@ -314,6 +445,7 @@ build_exposure <- function(lag_years) {
     group_by(researchid) |>
     fill(-c(researchid, tstart), .direction = "down") |>
     ungroup() |>
+    resolve_with_registry() |> # REG
     add_derived() |>
     relocate(researchid, tstart)
 
@@ -359,74 +491,228 @@ region_exposure <- function(fields_df, in_field, bordering) {
   )
 }
 
+# R2a (2026-10-14): a sarcoma or melanoma that arose IN AN ORGAN (e.g. a
+# breast angiosarcoma, C50) is matched with that ORGAN's exposure from the
+# field-to-organ mapping (03_rt-exposure.R), instead of a body region.
+organ_from_topo <- function(topo3, topo_num) {
+  case_when(
+    topo3 == "C50" ~ "breast",
+    topo3 == "C34" ~ "lung",
+    topo3 == "C73" ~ "thyroid",
+    topo3 == "C15" ~ "oesophagus",
+    topo3 == "C16" ~ "stomach",
+    topo3 == "C25" ~ "pancreas",
+    topo3 %in% c("C18", "C19", "C20") ~ "colorectum",
+    topo3 %in% c("C53", "C61", "C67") ~ "pelvic_organs",
+    (!is.na(topo_num) & topo_num <= 14) | topo3 %in% c("C30", "C31", "C32") ~ "head_neck",
+    TRUE ~ NA_character_
+  )
+}
+
 smn_bt <- smn_long |>
   filter(researchid %in% cohort$researchid, rt_site == "by_topography",
-         counts_site_smn, smn_timing == "during follow-up")
+         counts_site_smn, smn_timing == "during follow-up") |>
+  mutate(
+    organ = organ_from_topo(topo3, topo_num),
+    match_method = case_when(
+      !is.na(organ) ~ "organ (R2a)",
+      !is.na(body_region) & body_region != "other / unspecified" ~ "body region (R2)",
+      TRUE ~ "not matchable (location unspecified)"
+    )
+  )
+
+smn_keys <- c("researchid", "smn_number", "site_group", "topo", "body_region",
+              "organ", "match_method", "date_smn")
 
 smn_field_match <- smn_bt |>
-  select(researchid, smn_number, site_group, topo, body_region, date_smn) |>
+  select(all_of(smn_keys)) |>
   left_join(rt_t |> select(researchid, course, date_effective, rt_given,
                            any_of(c("mantle", "invy", "abdomen", "neck", "supraclav",
                                     "infraclav", "axilla", "mediast_any", "mediast_low",
                                     "lung", "paraaortic", "spleen", "splenhil",
-                                    "iliac", "inguinal"))),
+                                    "iliac", "inguinal")),
+                           all_of(organ_cols)),
             by = "researchid", relationship = "many-to-many") |>
   # Only RT courses given before the SMN.
   filter(date_effective < date_smn) |>
   left_join(region_map, by = "body_region")
 
 smn_field_match <- smn_field_match |>
-  mutate(region_exposure = if_else(
-    is.na(body_region) | body_region == "other / unspecified" |
-      map_lgl(in_field, is.null),
-    NA_integer_,
-    pmap_int(list(row_number()), function(i) {
-      region_exposure(smn_field_match[i, ], smn_field_match$in_field[[i]],
-                      smn_field_match$bordering[[i]])
-    })
-  )) |>
-  group_by(researchid, smn_number, site_group, topo, body_region, date_smn) |>
+  mutate(region_exposure = pmap_int(list(row_number()), function(i) {
+    r <- smn_field_match[i, ]
+    if (r$match_method == "organ (R2a)") {
+      return(as.integer(r[[paste0("organ_", r$organ)]]))
+    }
+    if (r$match_method == "body region (R2)") {
+      return(region_exposure(r, smn_field_match$in_field[[i]],
+                             smn_field_match$bordering[[i]]))
+    }
+    NA_integer_
+  })) |>
+  group_by(across(all_of(smn_keys))) |>
   summarise(region_exposure = organ_max(region_exposure), .groups = "drop")
 
 # SMNs with no RT course before them still need a row.
 smn_field_match <- smn_bt |>
-  select(researchid, smn_number, site_group, topo, body_region, date_smn) |>
-  left_join(smn_field_match,
-            by = c("researchid", "smn_number", "site_group", "topo",
-                   "body_region", "date_smn")) |>
+  select(all_of(smn_keys)) |>
+  left_join(smn_field_match, by = smn_keys) |>
   mutate(region_exposure = factor(region_exposure, levels = 0:2,
                                   labels = c("not irradiated", "bordering field", "in field")))
 
-# ---- 7. checks (printed; nothing is changed here) -------------------------------
+# ---- 7. checks with advice for action (printed; nothing is changed here) -------
 
-cat("\n== Course dates: how obtained, and window (W1-W3) ==\n")
+# Each check prints a table and then one or more lines starting with
+# "OK:" (nothing to do) or "ACTION:" (what to look at, and what to do). The
+# thresholds below decide when a check asks for action; they are rules of
+# thumb for review, not analysis decisions.
+pct <- function(x, n) if (n == 0) 0 else round(100 * x / n, 1)
+advise <- function(needs_action, action, ok) {
+  cat(if (needs_action) paste("ACTION:", action) else paste("OK:", ok), "\n")
+}
+threshold_pct <- 5 # % missing / disagreeing above which a check asks for action
+
+# -- 7.1 Course dates (W1, W2) --
+cat("\n== 7.1 Course dates: how obtained, and window (W1-W3) ==\n")
 print(count(course_timing, treatment, course, date_source, window), n = Inf)
+given_courses <- course_timing |>
+  filter((treatment == "chemotherapy" & given == "chemotherapy recorded") |
+           (treatment == "radiotherapy" & given == "1"))
+n_fup_assumed <- sum(given_courses$course != "prim" &
+                       given_courses$date_source == "assumed before follow-up (W1)")
+advise(n_fup_assumed > 0,
+       paste0(n_fup_assumed, " relapse treatment course(s) were GIVEN but have no date and no ",
+              "relapse date; they are assumed to be before follow-up (W1). If relapse ",
+              "treatment more than 5 years after diagnosis is plausible for these ",
+              "patients, look up the dates in the source records; otherwise note the ",
+              "number in the methods."),
+       "every relapse course that was given has a recorded or relapse date.")
+n_after_end <- sum(course_timing$window == "after end of observation (W2)")
+advise(n_after_end > 0,
+       paste0(n_after_end, " course(s) start after the end of observation. Because follow-up ",
+              "runs to the last date of any data (C17), this can only happen for patients ",
+              "who died: the course is dated after the death date. Check these dates ",
+              "(course_timing.Rds, window = 'after end of observation (W2)') against ",
+              "the source and correct the date or the death date."),
+       "no course starts after the end of observation.")
 
-cat("\n== Baseline exposure ==\n")
+# -- 7.2 Baseline exposure and missingness --
+cat("\n== 7.2 Baseline exposure ==\n")
 print(count(exposure_baseline, doxo_cat))
 print(count(exposure_baseline, procarb_cat))
 print(count(exposure_baseline, rt_technique))
 print(count(exposure_baseline, ovarian_damage))
-cat("Patients with treatment during follow-up:", sum(exposure_baseline$treatment_during_fup), "\n")
-
-cat("\n== W4: baseline totals that may be higher (a later course dose unknown) ==\n")
-print(colSums(exposure_baseline[paste0(dose_vars, "_incomplete")], na.rm = TRUE))
-
-cat("\n== Baseline organ exposure (0/1/2) ==\n")
-print(
-  exposure_baseline |>
-    select(researchid, all_of(organ_cols)) |>
-    pivot_longer(-researchid, names_to = "site", values_to = "exposure") |>
-    count(site, exposure) |>
-    pivot_wider(names_from = exposure, values_from = n, names_prefix = "exp_", values_fill = 0)
+n_base <- nrow(exposure_baseline)
+miss <- c(
+  doxorubicin_dose = sum(is.na(exposure_baseline$doxo_dose)),
+  procarbazine_dose = sum(is.na(exposure_baseline$procarb_dose)),
+  rt_technique = sum(is.na(exposure_baseline$rt_technique)),
+  ovarian_damage = sum(is.na(exposure_baseline$ovarian_damage))
 )
+cat("Missing (n, %):\n")
+print(data.frame(n = miss, pct = sapply(miss, pct, n = n_base)))
+advise(any(sapply(miss, pct, n = n_base) > threshold_pct),
+       paste0("more than ", threshold_pct, "% missing for: ",
+              paste(names(miss)[sapply(miss, pct, n = n_base) > threshold_pct], collapse = ", "),
+              ". The SAP requires a list of imputation approaches BEFORE any ",
+              "imputation code: send these percentages to the project leader. To see ",
+              "why doses are missing, read the 02_chemo-doses.R check 'Slots whose ",
+              "doxorubicin or procarbazine dose is NA, by reason'."),
+       paste0("missingness is at most ", threshold_pct, "% for the main exposures."))
 
-cat("\n== Time-varying rows (tstart > 0) ==\n")
-cat(sum(exposure_tv$tstart > 0), "change points in",
-    n_distinct(exposure_tv$researchid[exposure_tv$tstart > 0]), "patients\n")
+# -- 7.3 W4 incomplete totals --
+cat("\n== 7.3 W4: baseline totals that may be higher (a later course dose unknown) ==\n")
+incompl <- colSums(exposure_baseline[paste0(dose_vars, "_incomplete")], na.rm = TRUE)
+print(incompl)
+advise(any(incompl > 0),
+       paste0(max(incompl), " patient(s) have a total dose that is a LOWER BOUND (primary ",
+              "dose known, a later course unknown; W4). They may be put in too low a ",
+              "dose category. Report the number, and plan a sensitivity analysis ",
+              "excluding them (agree with the project leader)."),
+       "no baseline total is a lower bound.")
 
-cat("\n== Sarcoma / skin SMNs by body-region RT exposure (W5, descriptive) ==\n")
-print(count(smn_field_match, site_group, region_exposure))
+# -- 7.3b CAP: continuous doses capped --
+cat("\n== 7.3b CAP: baseline doses above the cap (continuous variables capped) ==\n")
+n_cap_d <- sum(exposure_baseline$doxo_was_capped, na.rm = TRUE)
+n_cap_p <- sum(exposure_baseline$procarb_was_capped, na.rm = TRUE)
+cat("doxorubicin >", cap_doxo_mg, "mg/m2:", n_cap_d,
+    "| procarbazine >", cap_procarb_mg, "mg/m2:", n_cap_p, "\n")
+advise(n_cap_d + n_cap_p > 0,
+       paste0(n_cap_d + n_cap_p, " baseline dose(s) were capped for the continuous ",
+              "variables. Most are probably recording errors in the number of cycles: ",
+              "review them with chemo_dose_review.Rds (02_chemo-doses.R) and the ",
+              "source records; report the number capped in the methods."),
+       "no baseline dose exceeds the caps.")
+
+# -- 7.4 R7: re-derived codebook rtcat vs recorded rtcatprim --
+cat("\n== 7.4 R7: re-derived rtcat vs recorded rtcatprim (patients whose only baseline RT course is primary) ==\n")
+prim_only <- course_timing |>
+  filter(treatment == "radiotherapy", window == "baseline", given == "1") |>
+  count(researchid) |> filter(n == 1) |> pull(researchid)
+r7 <- exposure_baseline |>
+  filter(researchid %in% prim_only) |>
+  select(researchid, rt_cat_cb) |>
+  left_join(rt_fields |> filter(course == "prim") |>
+              select(researchid, rt_cat_recorded = rt_cat_cb), by = "researchid") |>
+  mutate(agree = as.character(rt_cat_cb) == as.character(rt_cat_recorded))
+print(count(r7, agree))
+n_disagree <- sum(!r7$agree, na.rm = TRUE)
+advise(pct(n_disagree, nrow(r7)) > threshold_pct,
+       paste0(pct(n_disagree, nrow(r7)), "% of single-course patients have a re-derived rtcat ",
+              "that differs from the radiation oncologists' rtcatprim. The radiation ",
+              "oncologists probably used rules beyond the codebook definitions. Look ",
+              "at the cross-table below, then either adjust cb_cat() in section 3 or ",
+              "use the recorded rtcat for patients with one course; decide with the ",
+              "project leader."),
+       paste0("the re-derived rtcat agrees with rtcatprim for ",
+              100 - pct(n_disagree, nrow(r7)), "% of single-course patients."))
+if (n_disagree > 0) {
+  print(count(filter(r7, !agree), rt_cat_recorded, rt_cat_cb), n = Inf)
+}
+
+# -- 7.5 Baseline organ exposure --
+cat("\n== 7.5 Baseline organ exposure (0/1/2) ==\n")
+organ_tab <- exposure_baseline |>
+  select(researchid, all_of(organ_cols)) |>
+  pivot_longer(-researchid, names_to = "site", values_to = "exposure") |>
+  count(site, exposure) |>
+  pivot_wider(names_from = exposure, values_from = n, names_prefix = "exp_", values_fill = 0)
+print(organ_tab)
+organ_miss <- organ_tab |>
+  mutate(pct_na = pct(if ("exp_NA" %in% names(organ_tab)) exp_NA else 0, n_base))
+advise(any(organ_miss$pct_na > threshold_pct),
+       paste0("organ exposure is unknown for more than ", threshold_pct, "% of patients for: ",
+              paste(organ_miss$site[organ_miss$pct_na > threshold_pct], collapse = ", "),
+              ". Unknown means a relevant field flag is 9/missing or RT was given with ",
+              "no field recorded. Check the 03_rt-exposure.R tables 'RT technique per ",
+              "course' and 'Free-text field names'; include these in the imputation ",
+              "options for the project leader."),
+       paste0("organ exposure is unknown for at most ", threshold_pct, "% of patients for every site."))
+cat("REMINDER: the field-to-organ mapping is a DRAFT until Berthe approves it (R2).\n")
+
+# -- 7.6 Time-varying exposure --
+cat("\n== 7.6 Time-varying exposure (tstart > 0; 2-year lag, W3) ==\n")
+n_tv_pat <- n_distinct(exposure_tv$researchid[exposure_tv$tstart > 0])
+cat(sum(exposure_tv$tstart > 0), "change points in", n_tv_pat, "patients\n")
+advise(n_tv_pat < 10,
+       paste0("only ", n_tv_pat, " patient(s) have exposure that changes during follow-up. ",
+              "Time-varying models will differ little from baseline-only models; tell ",
+              "the project leader, who may prefer baseline exposure in the main models ",
+              "with the time-varying version as a check."),
+       paste0(n_tv_pat, " patients have exposure that changes during follow-up; use ",
+              "exposure_tv.Rds in the models (survival::tmerge with tdc())."))
+
+# -- 7.7 Sarcoma / skin body-region matching --
+cat("\n== 7.7 Sarcoma / skin SMNs by body-region RT exposure (W5, descriptive) ==\n")
+print(count(smn_field_match, site_group, match_method, region_exposure), n = Inf)
+n_region_unknown <- sum(is.na(smn_field_match$region_exposure))
+advise(n_region_unknown > 0,
+       paste0(n_region_unknown, " sarcoma/skin SMN(s) could not be matched to a field: the ",
+              "topography is unspecified (e.g. C44.9, C49.9) or no RT field information ",
+              "exists. List them with smn_field_match.Rds (region_exposure NA, ",
+              "body_region) and decide whether the topography can be refined from ",
+              "the source; otherwise report them as 'location unknown'."),
+       "every sarcoma/skin SMN was matched to a body region.")
+cat("REMINDER: the body-region mapping is a DRAFT until Berthe approves it (R2).\n")
 
 # ---- 8. save ----------------------------------------------------------------------
 

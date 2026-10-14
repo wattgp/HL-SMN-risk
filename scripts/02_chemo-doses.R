@@ -499,6 +499,17 @@ print(count(doses_course, course, ct_course_status))
 cat("\n== Slot regimen status ==\n")
 print(count(slots_long, course, regimen_status))
 
+cat("\n== Regimen codes not in chem_drugs.xlsx (dose and drugs unknown) ==\n")
+codes_missing <- slots_long |>
+  filter(regimen_status == "code not in chem_drugs") |>
+  count(course, regimen_code, sort = TRUE)
+print(codes_missing, n = Inf)
+cat(if (nrow(codes_missing) > 0) paste0("ACTION: ", sum(codes_missing$n), " regimen slot(s) use ",
+    "codes that are not in chem_drugs.xlsx, so their drugs and doses are unknown. ",
+    "Ask the data manager what these codes mean, then add them to chem_drugs.xlsx ",
+    "(and to the dose lookups if they contain doxorubicin or procarbazine).")
+    else "OK: every regimen code is in chem_drugs.xlsx.", "\n")
+
 cat("\n== Slots with 0 cycles ==\n")
 print(nrow(filter(slots_long, cycles == 0)))
 
