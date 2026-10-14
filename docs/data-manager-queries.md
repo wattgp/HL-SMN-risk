@@ -122,6 +122,11 @@ Counts are for the whole export (6,654 patients) unless "analytic cohort" is sta
 - **Question:** which hospital?
 - **File:** `Q12_hospital_code_0.csv`
 
+### Q14. Format of BMI (`bmi_diag`, `bmi_fup`)
+- **Found:** BMI values in the export look like `21.634.766.941.095.711`. The decimal separator seems lost and dots appear as thousands separators, so the values cannot be read reliably (the value 99 = unknown also occurs).
+- **For now:** BMI is not used (not shown in Table 1 and not imputed).
+- **Question:** can BMI (and, if available, height and weight separately) be exported with a plain decimal point, e.g. `21.63`?
+
 ### Q13. Missing core data (for information; corrections welcome)
 - HL diagnosis year unknown: 39 patients
 - Vital status unknown: 107 patients

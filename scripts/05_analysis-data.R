@@ -31,6 +31,10 @@
 #    already handle them (caps, W1, PRIM, D14, REG) and the remaining
 #    missing exposure is analysed as missing data.
 #    The duplicated ResearchIDs (Q1) are already excluded in 01 (C13).
+# E2 (2026-10-14) Dichotomised era 1989-1999 / 2000-latest (era2) for all
+#    analyses (project leader: "re-run analysis with dichotomized era").
+# S1 (2026-10-14) Sex "other" excluded from the cumulative-incidence plots
+#    and from analyses using sex (sex_analysis).
 # C17-LC (2026-10-14) The last-contact follow-up rule is a required
 #    sensitivity analysis: its outcomes are built here (suffix _lc).
 
@@ -91,7 +95,19 @@ lc_outcome <- function(date_event, date_fup_start, date_end, death_comp) {
 
 patients <- cohort |>
   filter(researchid %in% keep_ids) |>
-  left_join(baseline, by = "researchid")
+  left_join(baseline, by = "researchid") |>
+  mutate(
+    # E2 (2026-10-14): dichotomised era of diagnosis, used in the analyses
+    # instead of the 3-level era (which is kept for description).
+    era2 = factor(if_else(year_dx <= 1999, "1989-1999", "2000-latest"),
+                  levels = c("1989-1999", "2000-latest")),
+    # S1 (2026-10-14): sex "other" (2 patients in the real data) is not
+    # included in the cumulative-incidence plots; in the models it would
+    # form a category without events, so sex_analysis is NA for them and
+    # they drop out of analyses that use sex.
+    sex_analysis = factor(if_else(sex %in% c("female", "male"), sex, NA_character_),
+                          levels = c("female", "male"))
+  )
 lc_any <- lc_outcome(patients$date_first_any_smn, patients$date_fup_start,
                      patients$date_end_obs_lc, patients$death_competing_lc)
 patients <- patients |>

@@ -35,6 +35,16 @@
 #    cancer stratified by RT field exposure: by breast organ exposure
 #    (0/1/2) and by RT technique.
 # T3 (2026-10-14) FDR q-values for all Gray's tests (08_gray_tests.html).
+# E2 (2026-10-14) Dichotomised era (1989-1999 / 2000-latest) in all plots.
+# S1 (2026-10-14) Sex "other" not included in the plots.
+# X1 (2026-10-14) Organ exposure: "bordering field" and "not irradiated"
+#    collapsed into "not in field" in ALL analyses.
+# K5 (2026-10-14) Breast by RT technique: no RT and unknown technique left
+#    out; regional field and involved node collapsed into "limited".
+# K6 (2026-10-14) Curves drawn only while >= 10 patients are at risk (no
+#    jump at the last time point); plots only.
+# K7 (2026-10-14) Risk tables show number at risk and cumulative SMNs.
+# K8 (2026-10-14) Same axis limits on every cumulative-incidence plot.
 # K3 B4 RMTL horizon: 25 years since diagnosis (20 years of follow-up),
 #    matching the 25-year horizon of C3 and the ML analysis; 95% CI from
 #    200 bootstrap samples (patients resampled).
@@ -67,19 +77,27 @@ male_sites <- c("Prostate", "Testis", "Other male genital")
 
 # ---- 1. analysis data per outcome ---------------------------------------------------
 
+# S1: patients with sex "other" are not included in the plots.
+pat <- pat |> filter(!is.na(sex_analysis))
+
 grp_vars <- pat |>
-  transmute(researchid, sex = factor(sex), era = droplevels(era),
+  transmute(researchid, sex = droplevels(sex_analysis),
+            era = droplevels(era2),            # E2: dichotomised era
             age_group = age_dx_aya, age_dx, date_birth, date_fup_start,
-            # K4: RT field exposure for the breast plots (baseline exposure)
-            # Numbered labels keep a logical order (the plots sort strata
-            # alphabetically).
-            breast_rt = factor(organ_breast, levels = 0:2,
-                               labels = c("0 Not irradiated", "1 Bordering field",
-                                          "2 In field")),
-            rt_technique = factor(as.integer(rt_technique), levels = 1:5,
-                                  labels = c("1 No RT", "2 Mantle / extended field",
-                                             "3 Regional field (presumed IF)",
-                                             "4 Involved node", "5 RT, technique unknown")))
+            # K4 / X1: breast RT exposure, bordering and not irradiated
+            # COLLAPSED (2026-10-14): in field vs not in field.
+            breast_rt = factor(if_else(organ_breast == 2, "2 In field", "1 Not in field"),
+                               levels = c("1 Not in field", "2 In field")),
+            # K5 (2026-10-14): RT technique for the breast plots without
+            # "no RT" and without "technique unknown"; regional field and
+            # involved node collapsed into "limited". Numbered labels keep a
+            # logical order (the plots sort strata alphabetically).
+            rt_technique = factor(case_when(
+              rt_technique == "mantle / extended field" ~ "2 Mantle / extended",
+              rt_technique %in% c("regional field (presumed involved field)", "involved node") ~
+                "1 Limited",
+              TRUE ~ NA_character_),
+              levels = c("1 Limited", "2 Mantle / extended")))
 
 status_factor <- function(s) factor(s, levels = 0:2, labels = c("censored", "SMN", "death"))
 
@@ -89,7 +107,7 @@ outcome_data <- function(site = NULL, lc = FALSE) {
                           status = if (lc) status_any_lc else status_any,
                           time = if (lc) time_any_lc else time_any)
   } else {
-    d <- site_long |> filter(site_group == site) |>
+    d <- site_long |> filter(site_group == site, researchid %in% pat$researchid) |>
       transmute(researchid, status = if (lc) status_lc else status,
                 time = if (lc) time_lc else time)
   }
@@ -120,12 +138,32 @@ gray_p <- function(fit) {
   g$p.value_1
 }
 
-plot_ci <- function(fit, title, by_label = NULL, p = NA) {
+# K6 (2026-10-14): the curves stopped "shooting up" at the last time point,
+# where a single event among very few patients still at risk makes a large
+# jump. Each curve (each stratum) is drawn only while at least
+# min_at_risk patients are at risk: patients are censored at the time the
+# risk set falls below that number. FOR THE PLOTS ONLY; Gray's tests and the
+# tables use all follow-up.
+min_at_risk <- 10
+truncate_strata <- function(d, by = NULL) {
+  grp <- if (is.null(by)) rep("all", nrow(d)) else as.character(d[[by]])
+  d |>
+    mutate(.g = grp) |>
+    group_by(.g) |>
+    mutate(.t_end = if (n() >= min_at_risk) sort(time, decreasing = TRUE)[min_at_risk] else min(time),
+           status = if_else(time > .t_end, factor("censored", levels(status)), status),
+           time = pmin(time, .t_end)) |>
+    ungroup() |>
+    select(-.g, -.t_end)
+}
+
+plot_ci <- function(fit, title, by_label = NULL, p = NA, x_up, y_up) {
   sub <- if (!is.na(p)) sprintf("Gray's test p = %s (q-values for all Gray's tests: 08_gray_tests.html)",
                                 format.pval(p, digits = 2, eps = 0.001)) else NULL
   # One palette for lines AND bands, keyed by stratum name (otherwise the
   # bands get their own palette when some strata have no band).
-  lv <- tryCatch(sort(unique(tidy(fit)$strata)), error = function(e) NULL)
+  td <- tidy(fit)
+  lv <- if ("strata" %in% names(td)) sort(unique(td$strata)) else NULL
   pal_scales <- if (length(lv) > 1) {
     pal <- setNames(scales::hue_pal()(length(lv)), lv)
     list(scale_colour_manual(values = pal), scale_fill_manual(values = pal))
@@ -133,11 +171,16 @@ plot_ci <- function(fit, title, by_label = NULL, p = NA) {
   ggcuminc(fit, outcome = "SMN") +
     add_confidence_interval() +
     pal_scales +
-    add_risktable(risktable_stats = "n.risk") +
+    # K7 (2026-10-14): risk table with the number at risk and the
+    # cumulative number of SMNs at each time.
+    add_risktable(risktable_stats = "{n.risk} ({cum.event})",
+                  stats_label = "At risk (cumulative SMNs)") +
+    # K8 (2026-10-14): the SAME axis limits on every plot.
     scale_x_continuous(name = "Years since HL diagnosis",
-                       breaks = seq(0, 30, 5), labels = function(x) x + entry_years,
-                       expand = expansion(mult = c(0.02, 0.08))) +
-    scale_y_continuous(name = "Cumulative incidence", labels = scales::percent) +
+                       breaks = seq(0, x_up, 5), labels = function(x) x + entry_years,
+                       limits = c(0, x_up), expand = expansion(mult = c(0.06, 0.07))) +
+    scale_y_continuous(name = "Cumulative incidence", labels = scales::percent,
+                       limits = c(0, y_up)) +
     labs(title = title, subtitle = sub, colour = by_label) +
     guides(fill = "none") + # one legend (colour); bands share the colours
     theme_minimal(base_size = 11) +
@@ -147,48 +190,68 @@ plot_ci <- function(fit, title, by_label = NULL, p = NA) {
 strata <- list(overall = NULL, era = "era", sex = "sex", age = "age_group")
 strata_label <- c(era = "Era of diagnosis", sex = "Sex", age = "Age at diagnosis")
 
+# Pass 1: every plot is fitted first (on truncated data) so that common axis
+# limits can be set (K8); Gray's test on the full data.
+plot_specs <- list()
 gray_results <- list()
+add_spec <- function(d, by, outcome, title, by_label, file, caption = NULL, gray_by) {
+  fit <- tryCatch(fit_ci(truncate_strata(d, by), by), error = function(e) NULL)
+  if (is.null(fit)) {
+    cat("ACTION: cumulative incidence failed for", outcome, "/", file, "\n")
+    return(invisible())
+  }
+  p <- if (is.null(by)) NA else gray_p(tryCatch(fit_ci(d, by), error = function(e) NULL))
+  gray_results[[length(gray_results) + 1]] <<- tibble(outcome = outcome, by = gray_by, gray_p = p)
+  plot_specs[[length(plot_specs) + 1]] <<- list(fit = fit, title = title, by_label = by_label,
+                                                p = p, file = file, caption = caption)
+}
+
 for (o in outcomes) {
   d <- outcome_data(if (o == "Any invasive SMN") NULL else o)
   for (s in names(strata)) {
     by <- strata[[s]]
     if (s == "sex" && o %in% c(female_sites, male_sites)) next
     if (!is.null(by) && n_distinct(d[[by]], na.rm = TRUE) < 2) next
-    fit <- tryCatch(fit_ci(d, by), error = function(e) NULL)
-    if (is.null(fit)) {
-      cat("ACTION: cumulative incidence failed for", o, "/", s, "\n")
-      next
-    }
-    p <- if (is.null(by)) NA else gray_p(fit)
-    gray_results[[length(gray_results) + 1]] <- tibble(outcome = o, by = s, gray_p = p)
-    g <- plot_ci(fit, title = paste0(o, if (!is.null(by)) paste(" by", tolower(strata_label[[s]]))),
-                 by_label = if (!is.null(by)) strata_label[[s]], p = p)
-    fname <- paste0("08_ci_", gsub("[^A-Za-z0-9]+", "-", tolower(o)), "_", s, ".png")
-    ggsave(file.path(res_dir, fname), g, width = 8, height = 6, dpi = 200, bg = "white")
+    add_spec(d, by, o,
+             title = paste0(o, if (!is.null(by)) paste(" by", tolower(strata_label[[s]]))),
+             by_label = if (!is.null(by)) strata_label[[s]],
+             file = paste0("08_ci_", gsub("[^A-Za-z0-9]+", "-", tolower(o)), "_", s, ".png"),
+             gray_by = s)
   }
 }
-# K4: breast cancer (women) by RT field exposure: organ exposure of the
-# breast (0/1/2; decision R1) and RT technique (decisions R1a, R9).
+# K4: breast cancer (women) by RT field exposure (X1: in field vs not) and by
+# RT technique (K5: limited vs mantle / extended, irradiated women only).
 if ("Breast" %in% outcomes) {
   d <- outcome_data("Breast")
+  caps <- c(
+    breast_rt = paste(
+      "Breast in field: mantle, axilla, mediastinum, infraclavicular or lung field (field-to-organ",
+      "mapping, decision R2, draft pending approval); 'not in field' combines bordering fields",
+      "(neck or supraclavicular only) and no breast irradiation (X1). Unknown exposure not shown."),
+    rt_technique = paste(
+      "Irradiated women only; women without RT or with an unknown technique are not shown (K5).",
+      "Limited = regional field (presumed involved field) or involved node; mantle / extended =",
+      "mantle, inverted Y or full abdomen; largest field given (decision R1a)."))
   for (by in c("breast_rt", "rt_technique")) {
     db <- d |> filter(!is.na(.data[[by]])) |> mutate(across(all_of(by), droplevels))
     if (n_distinct(db[[by]]) < 2) next
-    fit <- tryCatch(fit_ci(db, by), error = function(e) NULL)
-    if (is.null(fit)) { cat("ACTION: breast plot by", by, "failed\n"); next }
-    p <- gray_p(fit)
     lab <- c(breast_rt = "Breast RT exposure", rt_technique = "RT technique")[[by]]
-    gray_results[[length(gray_results) + 1]] <- tibble(outcome = "Breast", by = by, gray_p = p)
-    g <- plot_ci(fit, title = paste0("Breast cancer (women) by ", lab),
-                 by_label = lab, p = p) +
-      labs(caption = paste(strwrap(paste(
-        "Breast RT exposure: field flags mapped to the breast (in field: mantle, axilla,",
-        "mediastinum, infraclavicular or lung field; bordering: neck or supraclavicular",
-        "field only; decision R2, draft pending approval). RT technique: largest field",
-        "given (R1a). Patients with unknown exposure are not shown."), 110), collapse = "\n"))
-    ggsave(file.path(res_dir, paste0("08_ci_breast_", by, ".png")), g,
-           width = 9, height = 6.5, dpi = 200, bg = "white")
+    add_spec(db, by, "Breast", title = paste0("Breast cancer (women) by ", lab), by_label = lab,
+             file = paste0("08_ci_breast_", by, ".png"),
+             caption = paste(strwrap(caps[[by]], 110), collapse = "\n"), gray_by = by)
   }
+}
+
+# Pass 2: common axis limits (K8) and the plots.
+all_tidy <- map_dfr(plot_specs, ~ tidy(.x$fit) |> filter(outcome == "SMN"))
+x_up <- ceiling(max(all_tidy$time, na.rm = TRUE) / 5) * 5
+y_up <- min(1, ceiling(max(all_tidy$conf.high, na.rm = TRUE) * 10) / 10)
+cat("Common axes (K8): years since diagnosis 5 to", x_up + entry_years,
+    "| cumulative incidence 0 to", y_up, "\n")
+for (sp in plot_specs) {
+  g <- plot_ci(sp$fit, sp$title, sp$by_label, sp$p, x_up = x_up, y_up = y_up)
+  if (!is.null(sp$caption)) g <- g + labs(caption = sp$caption)
+  ggsave(file.path(res_dir, sp$file), g, width = 9, height = 6.5, dpi = 200, bg = "white")
 }
 gray_results <- bind_rows(gray_results) |>
   # T3 (2026-10-14): FDR q-values (Benjamini & Hochberg 1995) across all
@@ -245,7 +308,7 @@ b3_plots <- map(b3_outcomes, function(o) {
   st <- which(fit$states == "SMN")
   df <- tibble(age = fit$time, ci = fit$pstate[, st],
                lo = fit$lower[, st], hi = fit$upper[, st], n_risk = fit$n.risk[, 1]) |>
-    filter(age >= 25) # K2
+    filter(age >= 25, n_risk >= min_at_risk) # K2; K6: only while >= 10 at risk
   ggplot(df, aes(age, ci)) +
     geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.2) +
     geom_step() +

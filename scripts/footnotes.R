@@ -39,6 +39,7 @@ fn_cohort <- paste(
 # ---- per-variable footnotes ------------------------------------------------------
 fn_variables <- c(
   era = "Calendar period of HL diagnosis: 1989-1994, 1995-2004, 2005-latest (decision C3).",
+  era2 = "Dichotomised era of HL diagnosis: 1989-1999 vs 2000-latest; used in all analyses (decision E2).",
   age_dx = "Age at HL diagnosis in years, from mid-month dates of birth and diagnosis.",
   age_dx_group = "Completed years at HL diagnosis: 15-20, 21-30, 31-40, 41-50 (decision C15).",
   age_dx_aya = "Adolescents and young adults (AYA) 15-39 vs 40-50 years at diagnosis (decision C16).",
@@ -46,7 +47,7 @@ fn_variables <- c(
     "From the ICD-O-3 morphology of the HL diagnosis: nodular sclerosis 9663-9667; mixed",
     "cellularity 9652; lymphocyte-rich 9651; lymphocyte-depleted 9653-9655; nodular",
     "lymphocyte-predominant 9659; classical HL not otherwise specified 9650; other/unknown otherwise."),
-  smoke_ever = "Any indication of smoking at any age, self-reported or in medical records (codebook). Unknown shown separately; excluded (listwise) from the lung-cancer x smoking models (decision Q-RT3b).",
+  smoke_ever = "Any indication of smoking at any age, self-reported or in medical records (codebook). Unknown counted as missing; excluded (listwise) from the lung-cancer x smoking models (decision Q-RT3b).",
   bmi_dx = "Body mass index at HL diagnosis (kg/m2); values outside 10-80 set to missing. Height and weight are not recorded separately.",
   doxo_any = paste(
     "Doxorubicin received, derived from the recorded chemotherapy regimens (codebook drug codes)",

@@ -99,7 +99,9 @@ read_raw <- function(file = raw_file) {
 #    site can only support very few parameters, so covariates for small
 #    sites must be chosen sparingly (to be agreed per site).
 min_cases_plot <- 10
-min_cases_model <- 10
+# C12a (2026-10-14): multivariable models only for sites with MORE THAN 15
+# invasive SMNs (i.e. >= 16); plots keep the >= 10 threshold.
+min_cases_model <- 16
 
 # ---- dose categories (decision D11 / Q-CT5 / Q-CT6 in 02_chemo-doses.R) ----------
 

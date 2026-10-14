@@ -25,8 +25,9 @@ Beatriz Torrinha (r)
   and will be rewritten.
 - [x] **SMN site groups approved** (2026-10-14). All groups are kept in the data
   and in a comprehensive SMN table. Sites with **>= 10 invasive SMNs** get their
-  own plots and models (`min_cases_plot`, `min_cases_model` in `00_config.R`;
-  changed from the SAP's > 20 / >= 50).
+  own plots, sites with **> 15** their own multivariable models
+  (`min_cases_plot`, `min_cases_model` in `00_config.R`; changed from the
+  SAP's > 20 / >= 50).
 - [x] **Check follow-up time units** (fixed 2026-10-12). All follow-up times
   and `age_dx` now use `lubridate` year lengths.
 - [x] **Blanket missing-value recode removed** (2026-10-14). The old cleaning
@@ -74,8 +75,8 @@ Agreed with the project leader; the analysis script must include each one.
 | Tag | Sensitivity analysis | Main analysis | Data needed |
 |---|---|---|---|
 | C17-LC | End of follow-up at **last contact** (earlier rule: emigration censored, death after last contact censored at last contact) | End at the last date of any data | `date_end_obs_lc`, `death_competing_lc` (01) |
-| Q-RT1 | Organ exposure **binary** (in field vs not) | 0 / 1 / 2 | organ exposure (03, 04) |
-| R4-era | Diagnosis **era** as a surrogate for RT dose | – | `era` (01) |
+| (X1) | *Binary organ exposure (in field vs not) is now the MAIN analysis (2026-10-14); no longer a sensitivity analysis.* | – | – |
+| R4-era | Diagnosis **era** as a surrogate for RT dose (dichotomised 1989-1999 / 2000-latest, E2) | – | `era2` (05) |
 | R7 | **Parallel analysis with the codebook RT categories** (`rtcatprim`, `rtsupraprim`, `rtmidprim`, `rtinfraprim`, `rtneckprim`, `rtmedprim`; defined with radiation oncologists) | Field-flag-based organ exposure and RT technique | `rt_*_cb` (03 per course; 04 combined over primary and follow-up courses) |
 | Q-CT1 B | **Doxorubicin-equivalent** dose (Feijen 2019; COG ratios as a further check) | Doxorubicin dose + epirubicin yes/no | `doxo_eq_feijen_dose`, `doxo_eq_cog_dose` (02, 04) |
 | Q-CT6 | **Finer doxorubicin** categories 0 / 1-200 / 201-349 / >=350 | 0 / 1-200 / >200 | `doxo_cat_fine` (04) |
@@ -162,7 +163,7 @@ output of 01-03):
 | 4 | `scripts/04_exposure-window.R` | Joins 1-3. Places each treatment course in time (missing dates: rules W1-W3); baseline (fixed) exposure at the start of follow-up and time-varying exposure after it; dose categories; ovarian damage; sarcoma/skin SMNs matched to RT fields by body region (descriptive). | `exposure_baseline.Rds`, `exposure_tv.Rds`, `course_timing.Rds`, `smn_field_match.Rds` |
 | 5 | `scripts/05_analysis-data.R` | Analysis datasets: cohort + baseline exposure; holds out patients with key outstanding data questions (DQ); outcomes under the main and last-contact (C17-LC) follow-up rules. | `analysis_patients.Rds`, `analysis_site_long.Rds`, `analysis_tv.Rds`, `dq_hold.Rds` |
 | 6 | `scripts/06_descriptive.R` | SAP part A: Table 1 (by era), Table 2 (all SMN site groups), Table 2b (behaviour). | `output/<dummy|real>/06_*.html` |
-| 7 | `scripts/07_imputation.R` | Missing data: complete case (M1), MICE (M2) and SMC-FCS (M3) in parallel; comparison table. | `imp_m2_mice.Rds`, `imp_m3_smcfcs.Rds`, `output/<dummy|real>/07_imputation_comparison.html` |
+| 7 | `scripts/07_imputation.R` | Missing data: complete case (M1), MICE (M2) and SMC-FCS (M3) in parallel; comparison table. The imputations are **cached** (`imp_cache.Rds`) and only recomputed when the data, the imputation code or the package versions change (`force_imputation <- TRUE` to recompute). | `imp_m2_mice.Rds`, `imp_m3_smcfcs.Rds`, `output/<dummy|real>/07_imputation_comparison.html` |
 | 8 | `scripts/08_cumulative-incidence.R` | SAP part B: Aalen-Johansen cumulative incidence + Gray's test (B1), attained age (B3), restricted mean time lost (B4); plots for any SMN and sites with >= 10 SMNs; C17-LC sensitivity. B5 (SIR/AER) later. | `output/<dummy|real>/08_*.png`, `08_table3_*.html`, `08_table4_rmtl.html` |
 | 9 | `scripts/09_models.R` | SAP part C, RT as primary exposure: base model (RT + age + year; spline only if LR-significant) -> effect modification first (stratified estimates + LR interaction tests, incl. chemotherapy and time since diagnosis) -> confounding (>=10% change or lower AIC) -> final model by C1 Poisson, C2 Cox, C3 pseudo-observations; Firth for sites with <20 SMNs; M1 vs M2/M3 comparison. All covariate estimates reported. | `output/<dummy|real>/09_<outcome>.html`, `09_summary_rt.html` |
 | 10 | *(to do)* machine learning | SAP part D: breast cancer, lasso/elastic net (primary), random survival forests (secondary). | – |

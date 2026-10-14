@@ -1,6 +1,7 @@
 # 09_models.R
 # SAP part C: multivariable models of SMN risk, with RADIOTHERAPY as the
-# primary exposure. For "any SMN" and each site with >= min_cases_model SMNs.
+# primary exposure. For "any SMN" and each site with MORE THAN 15 invasive
+# SMNs (min_cases_model = 16 in 00_config.R; decision C12a).
 #
 # Workflow per outcome (decisions Q6, Q6a-e; 2026-10-14):
 #   0. Base model: RT + age at diagnosis + year of diagnosis (both linear;
@@ -52,6 +53,22 @@
 # MD1 Primary RT variable: organ exposure 0/1/2 for organ sites (binary in
 #     field vs not for small sites); RT volume (none / extended / limited)
 #     for any SMN; any RT (yes/no) for sites without an organ mapping.
+# C12a (2026-10-14) Multivariable models only for sites with > 15 invasive
+#    SMNs (min_cases_model = 16). All site-specific analyses count invasive
+#    SMNs only (behaviour 3 or 9; from 01_clean-data.R).
+# EM-B (2026-10-14) Additional effect-modification analysis for breast
+#    cancer in AYA women (< 40): anthracycline receipt, ovarian failure
+#    (proxy: ovarian damage), smoking (section 4c).
+# X1 (2026-10-14) Organ exposure collapsed to in field vs not in field
+#    (bordering + not irradiated) in ALL analyses; replaces the 3-level
+#    exposure of MD1 (the T2a trend test therefore no longer applies).
+# E2 (2026-10-14) Dichotomised era (1989-1999 / 2000-latest) as the era
+#    effect modifier.
+# A2 (2026-10-14) Age (or year) not in a model twice: if age group (era) is
+#    kept as an effect modifier, it replaces continuous age (year).
+# S1 (2026-10-14) Sex "other" excluded from analyses using sex.
+# R-REF (2026-10-14) Model tables show the reference category of every
+#    categorical covariate.
 # T1 (2026-10-14) Confirmatory: the RT association for any invasive SMN,
 #    breast cancer (women) and lung cancer, at alpha = 0.05; all other
 #    outcomes are exploratory.
@@ -139,26 +156,39 @@ prep_exposure <- function(d) {
       rt_technique %in% c("regional field (presumed involved field)", "involved node") ~ "limited",
       TRUE ~ NA_character_), levels = c("none", "limited", "extended")),
     doxo_any_f = yn(doxo_any), procarb_any_f = yn(procarb_any),
+    # Any anthracycline (doxorubicin, epirubicin or other anthracycline /
+    # anthraquinone): yes if any is yes, no if all are no (EM-B).
+    anthra_any_f = factor(case_when(
+      doxo_any %in% "yes" | epirubicin_any %in% "yes" | other_anthra_any %in% "yes" ~ "yes",
+      doxo_any %in% "no" & epirubicin_any %in% "no" & other_anthra_any %in% "no" ~ "no"),
+      levels = c("no", "yes")),
     doxo_cat_f = factor(as.character(doxo_cat), levels = c("0", "1-200", ">200")),
     procarb_cat3 = factor(case_when(
       procarb_cat == "0" ~ "0", procarb_cat == "<=4.2" ~ "<=4.2",
-      procarb_cat %in% c("4.3-8.4", ">8.4") ~ ">4.2"), levels = c("0", "<=4.2", ">4.2")),
+      procarb_cat %in% c("4.3-8.4", ">8.4", ">4.2") ~ ">4.2"), levels = c("0", "<=4.2", ">4.2")),
     ovarian_damage = factor(ovarian_damage, levels = 0:1, labels = c("no", "yes")),
     across(starts_with("organ_"), ~ factor(.x, levels = 0:2,
                                            labels = c("not irradiated", "bordering field", "in field")),
            .names = "{.col}_f"),
     across(starts_with("organ_") & !ends_with("_f"),
-           ~ factor(if_else(.x == 2, "in field", "not in field"),
-                    levels = c("not in field", "in field")), .names = "{.col}_bin")
+           ~ factor(if_else(.x == 2, "in field", "not in field (bordering or not irradiated)"),
+                    levels = c("not in field (bordering or not irradiated)", "in field")),
+           .names = "{.col}_bin")
   )
 }
-pat <- pat |>
-  # Year of diagnosis centred at 2000 (numerical stability; the rate ratio
-  # per year is unchanged).
-  mutate(year_dx = as.numeric(year_dx) - 2000, sex = factor(sex),
-         era = droplevels(era), age_dx_aya = droplevels(age_dx_aya),
-         smoke_ever = yn(smoke_ever)) |>
-  prep_exposure()
+pat_raw <- pat # unprepared copy, used to rebuild the imputed datasets
+prep_pat <- function(d) {
+  d |>
+    # Year of diagnosis centred at 2000 (numerical stability; the rate ratio
+    # per year is unchanged).
+    mutate(year_dx = as.numeric(year_dx) - 2000,
+           sex = sex_analysis,                     # S1: sex "other" -> NA
+           era = droplevels(era), era2 = droplevels(era2), # E2
+           age_dx_aya = droplevels(age_dx_aya),
+           smoke_ever = yn(smoke_ever)) |>
+    prep_exposure()
+}
+pat <- prep_pat(pat)
 tv <- prep_exposure(tv)
 
 # ---- 2. per-outcome data: counting process with windows and time-varying RT ------
@@ -176,7 +206,7 @@ build_long <- function(outcome, tv_vars) {
       transmute(researchid, time, status, time_other_smn)
   }
   base <- base |> filter(!is.na(time), time > 0) |>
-    left_join(pat |> select(researchid, sex, age_dx, year_dx, smoke_ever, era, age_dx_aya),
+    left_join(pat |> select(researchid, sex, age_dx, year_dx, smoke_ever, era2, age_dx_aya),
               by = "researchid")
   if (outcome %in% female_sites) base <- filter(base, sex == "female")
   if (outcome %in% male_sites) base <- filter(base, sex == "male")
@@ -265,8 +295,10 @@ model_outcomes <- outcome_counts |> filter(n_smn >= min_cases_model)
 run_outcome <- function(outcome, n_smn) {
   small <- n_smn < small_site && outcome != "Any invasive SMN"
   organ <- organ_of_site[outcome]
+  # X1 (2026-10-14): organ exposure is ALWAYS in field vs not in field
+  # (bordering and not irradiated collapsed), for every site size.
   rt <- if (outcome == "Any invasive SMN") "rt_volume" else if (!is.na(organ)) {
-    if (small) paste0("organ_", organ, "_bin") else paste0("organ_", organ, "_f")
+    paste0("organ_", organ, "_bin")
   } else "rt_any_f"
   big <- n_smn >= 50
   chemo_conf <- if (big) c("doxo_cat_f", "procarb_cat3") else c("doxo_any_f", "procarb_any_f")
@@ -274,7 +306,7 @@ run_outcome <- function(outcome, n_smn) {
   # limited to age at diagnosis (AYA 15-39 vs 40-50), doxorubicin and era.
   # The earlier modifiers are still analysed and reported as ADDITIONAL
   # (kept for future use; not used to build the model).
-  main_modifiers <- c("age_dx_aya", "doxo_any_f", "era")
+  main_modifiers <- c("age_dx_aya", "doxo_any_f", "era2") # E2: dichotomised era
   additional_modifiers <- unique(c("procarb_any_f", site_modifiers[[outcome]], "window"))
   modifiers <- unique(c(main_modifiers, setdiff(additional_modifiers, "window")))
   confounders <- unique(c(chemo_conf, site_confounders[[outcome]],
@@ -340,6 +372,15 @@ run_outcome <- function(outcome, n_smn) {
   # Only the MAIN modifiers (T2b) can enter the model.
   modifiers_kept <- em |> filter(set == "main (T2b)") |> distinct(modifier, interaction_p) |>
     filter(!is.na(interaction_p), interaction_p < em_p) |> pull(modifier)
+  # A2 (2026-10-14): age (and year) must not enter twice. If age group
+  # (AYA) is kept as a modifier, it replaces continuous age in the model;
+  # likewise the dichotomised era replaces continuous year of diagnosis.
+  drop_cont <- c(if ("age_dx_aya" %in% modifiers_kept) "age_dx",
+                 if ("era2" %in% modifiers_kept) "year_dx")
+  if (length(drop_cont)) {
+    base_terms <- base_terms[!vapply(base_terms, function(t)
+      any(vapply(drop_cont, function(v) grepl(v, t, fixed = TRUE), logical(1))), logical(1))]
+  }
 
   # 2. confounding NEXT (Q6a): change-in-estimate (on the RT log rate ratio)
   #    or lower AIC, among candidates that are not modifiers.
@@ -422,26 +463,38 @@ run_outcome <- function(outcome, n_smn) {
   }
   fit_imputed <- function(imps) {
     if (is.null(imps)) return(NULL)
+    imp_cols <- c("doxo_cat", "procarb_cat", "rt_technique", "ovarian_damage", "smoke_ever",
+                  grep("^organ_", names(imps[[1]]), value = TRUE))
     fits <- map(imps, function(di) {
-      di <- prep_exposure(di |> left_join(pat |> select(researchid, year_dx, sex2 = sex), by = "researchid") |> # year_dx already centred
-                            mutate(sex = sex2, rt_any = as.integer(rt_technique != "no RT"),
-                                   doxo_any = if_else(doxo_cat == "0", "no", "yes"),
-                                   procarb_any = if_else(procarb_cat == "0", "no", "yes"),
-                                   ovarian_damage = ovarian_damage))
+      # Start from the analysis patients and overwrite only the imputed
+      # columns, so every other variable is exactly as in the M1 analysis.
+      di <- di |> select(researchid, any_of(imp_cols)) |>
+        mutate(across(any_of(c("doxo_cat", "procarb_cat", "rt_technique")), as.character),
+               across(starts_with("organ_"), ~ as.integer(as.character(.x))),
+               smoke_ever = as.character(smoke_ever))
+      base <- pat_raw |> filter(researchid %in% di$researchid) |>
+        select(-any_of(setdiff(names(di), "researchid"))) |>
+        left_join(di, by = "researchid") |>
+        mutate(doxo_any = if_else(doxo_cat == "0", "no", "yes"),
+               procarb_any = if_else(procarb_cat == "0", "no", "yes"),
+               rt_any = as.integer(rt_technique != "no RT"))
+      base <- prep_pat(base)
       if (outcome != "Any invasive SMN") {
-        di <- di |> select(-status_any, -time_any) |>
+        base <- base |> select(-status_any, -time_any) |>
           inner_join(site_long |> filter(site_group == outcome) |>
                        transmute(researchid, time_any = time, status_any = status), by = "researchid")
       }
-      if (outcome %in% female_sites) di <- filter(di, sex == "female")
-      if (outcome %in% male_sites) di <- filter(di, sex == "male")
-      di <- di |> mutate(ev = as.integer(status_any == 1L), tstart = 0, tstop = time_any, id = researchid,
-                         other_smn = factor("no", levels = c("no", "yes"))) |>
+      if (outcome %in% female_sites) base <- filter(base, sex == "female")
+      if (outcome %in% male_sites) base <- filter(base, sex == "male")
+      base <- base |> mutate(ev = as.integer(status_any == 1L), tstart = 0, tstop = time_any,
+                             id = researchid, other_smn = factor("no", levels = c("no", "yes"))) |>
         filter(tstop > 0)
-      dl <- survSplit(Surv(tstart, tstop, ev) ~ ., data = as.data.frame(di), cut = window_cuts_fu, episode = "window_i")
+      dl <- survSplit(Surv(tstart, tstop, ev) ~ ., data = as.data.frame(base), cut = window_cuts_fu,
+                      episode = "window_i")
       dl$window <- factor(dl$window_i, 1:3, c("5-14", "15-24", ">=25")); dl$pt <- dl$tstop - dl$tstart
       # Same estimation as the complete-case fit (Firth for small sites, Q6e).
-      tryCatch(fit_c1(dl, setdiff(final_terms, "other_smn"), firth = firth), error = function(e) NULL)
+      tryCatch(fit_c1(dl, setdiff(final_terms, "other_smn"), firth = firth),
+               error = function(e) { cat("  imputed fit failed:", conditionMessage(e), "\n"); NULL })
     })
     pool_rubin(fits)
   }
@@ -470,7 +523,14 @@ run_outcome <- function(outcome, n_smn) {
                      rt_pooled(fit_imputed(imp_m2), "M2 MICE (baseline exposure)"),
                      rt_pooled(fit_imputed(imp_m3), "M3 SMC-FCS (baseline exposure)"))
 
+  # Reference categories of the factors in the final model (R-REF): one
+  # row "reference" per factor in the model tables.
+  final_vars <- unique(gsub("^ns\\(|, df = 3\\)$", "", unlist(strsplit(final_terms, ":", fixed = TRUE))))
+  factor_refs <- unlist(lapply(final_vars, function(v) {
+    if (v %in% names(d) && is.factor(d[[v]])) setNames(levels(droplevels(d[[v]]))[1], v) else NULL
+  }))
   list(outcome = outcome, n_smn = n_smn, rt = rt, firth = firth, n_rows = nrow(d),
+       factor_refs = factor_refs,
        p_rt = p_rt, confirmatory = outcome %in% confirmatory_outcomes, monotonic = monotonic,
        n_patients = n_distinct(d$id), events = sum(d$ev),
        spline_tests = spline_tests, em = em, modifiers_kept = modifiers_kept,
@@ -511,6 +571,65 @@ if (length(results)) {
   }
 }
 
+# ---- 4c. additional effect modification: breast cancer in AYA women (EM-B) --------
+
+# EM-B (2026-10-14, project leader): an ADDITIONAL effect-modification
+# analysis for subsequent (invasive) breast cancer, restricted to women
+# diagnosed with HL before age 40 (AYA, 15-39). Effect modifiers:
+#   - anthracycline receipt (any anthracycline: doxorubicin, epirubicin or
+#     other anthracycline / anthraquinone; yes / no);
+#   - ovarian failure: NOT recorded in the export; the proxy is "ovarian
+#     damage" = pelvic RT or cumulative procarbazine > 4.2 g/m2 (decision
+#     R3; Swerdlow 2012, Krul 2017, Schaapveld 2015);
+#   - smoking (ever).
+# For each modifier separately (patients with a known value): the breast
+# RT rate ratio (in field vs not, C1) within each category, and a likelihood-
+# ratio test of the interaction. Adjusted for age and year of diagnosis and
+# an earlier other SMN, as in the main models. Firth estimation if fewer
+# than 20 SMNs. q-values within this family of 3 tests. Does NOT change the
+# main model.
+em_breast_aya <- NULL
+if ("Breast" %in% site_long$site_group) {
+  em_mods <- c(anthra_any_f = "Anthracycline receipt", ovarian_damage = "Ovarian failure (proxy: ovarian damage)",
+               smoke_ever = "Ever smoked")
+  rt_b <- "organ_breast_bin"
+  db <- build_long("Breast", intersect(c(rt_b, "anthra_any_f", "ovarian_damage"), names(tv)))
+  db <- db[db$age_dx_aya %in% "AYA 15-39", ]
+  em_breast_aya <- imap_dfr(em_mods, function(lab, mv) {
+    dm <- db[complete.cases(db[, c(rt_b, "age_dx", "year_dx", mv)]), ]
+    firth_b <- sum(dm$ev) < small_site
+    terms_b <- c(rt_b, "age_dx", "year_dx", "other_smn")
+    if (sum(dm$ev) < min_events_cc) {
+      return(tibble(modifier = lab, level = NA_character_, smns = sum(dm$ev),
+                    rt_estimate = "too few events", interaction_p = NA_real_, note = NA_character_))
+    }
+    m_main <- fit_c1(dm, c(terms_b, mv), firth_b)
+    m_int <- tryCatch(fit_c1(dm, c(terms_b, mv, paste0(rt_b, ":", mv)), firth_b), error = function(e) NULL)
+    tab <- tapply(dm$ev, list(dm[[rt_b]], dm[[mv]]), sum); tab[is.na(tab)] <- 0
+    sparse <- is.null(m_int) || degenerate(m_int) || min(tab) < sparse_min
+    p <- if (sparse) NA_real_ else lr_test(m_main, m_int)
+    map_dfr(levels(droplevels(factor(dm[[mv]]))), function(lv) {
+      ds <- dm[dm[[mv]] == lv, ]
+      est <- if (sum(ds$ev) < 3) "too few events" else {
+        ms <- tryCatch(fit_c1(ds, terms_b, sum(ds$ev) < small_site), error = function(e) NULL)
+        if (is.null(ms) || degenerate(ms)) "not estimable (sparse categories)" else {
+          b <- rt_coefs(ms, rt_b)
+          v <- if (inherits(ms, "coxphf")) ms$var else vcov(ms)
+          se <- sqrt(diag(as.matrix(v)))[names(b)]
+          sprintf("%.2f (%.2f\u2013%.2f)", exp(b), exp(b - 1.96 * se), exp(b + 1.96 * se))
+        }
+      }
+      tibble(modifier = lab, level = paste0(lab, ": ", lv), smns = sum(ds$ev),
+             rt_estimate = est, interaction_p = p,
+             note = if (sparse) "interaction not testable: sparse cells" else
+               if (firth_b) "Firth-penalised" else NA_character_)
+    })
+  })
+  em_q <- em_breast_aya |> distinct(modifier, interaction_p) |>
+    mutate(interaction_q = p.adjust(interaction_p, method = "BH"))
+  em_breast_aya <- em_breast_aya |> left_join(em_q, by = c("modifier", "interaction_p"))
+}
+
 # ---- 5. tables with footnotes (Q5) ------------------------------------------------
 
 # Readable labels for model terms (internal variable names -> table text).
@@ -529,7 +648,11 @@ pretty_term <- function(x) {
             "smoke_ever" = "Ever smoked: ", "ovarian_damage" = "Ovarian damage: ",
             "other_smn" = "Earlier other SMN: ", "sexmale" = "Sex: male", "^sex$" = "Sex",
             "^age_dx$" = "Age at diagnosis (per year)", "^year_dx$" = "Year of diagnosis (per year)",
-            "^window$" = "Time since diagnosis (window)")
+            "^window$" = "Time since diagnosis (window)",
+            "ns\\(age_dx, df = 3\\)" = "Age at diagnosis, spline basis ",
+            "ns\\(year_dx, df = 3\\)" = "Year of diagnosis, spline basis ",
+            "age_dx_aya" = "Age at diagnosis: ", "era2" = "Era of diagnosis: ",
+            "^sexfemale$" = "Sex: female")
   for (k in names(repl)) out <- sub(k, repl[[k]], out)
   out <- gsub(":", " × ", sub(": $", "", out), fixed = TRUE)
   gsub(" ×  ", ": ", out, fixed = TRUE)
@@ -560,8 +683,9 @@ method_refs <- paste(
   "doi:10.1177/0962280209105020;", fn_refs[["Schaapveld2015"]])
 term_notes <- unique(na.omit(unlist(map(results, ~ c(.x$rt, .x$final_terms)))))
 var_note <- paste(
-  "Variable definitions: RT exposure of the organ 0 = not irradiated, 1 = bordering a field,",
-  "2 = in field (field-to-organ mapping, draft R2); RT volume none / limited (regional field or",
+  "Variable definitions: RT exposure of the organ = in field vs not in field (not in field",
+  "combines bordering a field and not irradiated; decision X1; field-to-organ mapping, draft R2);",
+  "era of diagnosis 1989-1999 vs 2000-latest (E2); RT volume none / limited (regional field or",
   "involved node) / extended (mantle, inverted Y, full abdomen); doxorubicin and procarbazine as",
   "in Table 1 (Neppelenbroek 2024 categories); ovarian damage = pelvic RT or procarbazine >4.2 g/m2.")
 
@@ -575,8 +699,10 @@ for (r in results) {
                    if (r$confirmatory) " (CONFIRMATORY, alpha 0.05; T1)" else " (exploratory)")
   em_tab <- if (is.null(r$em) || !nrow(r$em)) NULL else
     r$em |> mutate(interaction_p = signif(interaction_p, 2), interaction_q = signif(interaction_q, 2),
+                   # Category labels name the modifier (e.g. "Doxorubicin: yes").
+                   level = paste0(pretty_term(modifier), ": ", level),
                    modifier = paste0(pretty_term(modifier), " [", set, "]")) |>
-      select(-set) |>
+      select(modifier, level, rt_estimate, interaction_p, interaction_q, note) |>
       gt(groupname_col = "modifier") |>
       cols_label(level = "Category of modifier", interaction_p = "Interaction p (LR test)",
                  interaction_q = "q (FDR, main modifiers)",
@@ -585,17 +711,34 @@ for (r in results) {
   conf_tab <- if (is.null(r$conf) || !nrow(r$conf)) NULL else
     r$conf |> mutate(candidate = pretty_term(candidate)) |> gt() |>
       cols_label(candidate = "Candidate confounder", pct_change = "Change in RT estimate (%)",
-                 delta_aic = "ΔAIC", kept = "Kept") |>
+                 delta_aic = "ΔAIC", kept = "Kept", note = "Note") |>
       tab_header(title = paste("Step 2. Confounding:", r$outcome))
   final <- bind_rows(r$c1, r$c2) |>
     pivot_wider(names_from = scale, values_from = est)
   c3w <- r$c3 |> mutate(horizon = paste0("Risk difference at ", horizon, " y (C3)")) |>
     pivot_wider(names_from = horizon, values_from = est)
-  final <- final |> full_join(c3w, by = "term") |> mutate(term = pretty_term(term))
+  final <- final |> full_join(c3w, by = "term")
+  # R-REF: a "reference" row for each factor, placed before its other levels.
+  ref_rows <- tibble(term = paste0(names(r$factor_refs), r$factor_refs))
+  for (cc in setdiff(names(final), "term")) {
+    ref_rows[[cc]] <- if (grepl("Risk difference", cc)) "0 (reference)" else "1.00 (reference)"
+  }
+  final <- bind_rows(final, ref_rows) |>
+    mutate(.var = vapply(term, function(t) {
+      hit <- names(r$factor_refs)[startsWith(t, names(r$factor_refs)) & !grepl(":", t, fixed = TRUE)]
+      if (length(hit)) hit[1] else t
+    }, character(1)),
+    .ord = match(.var, unique(c(names(r$factor_refs), .var))),
+    .is_ref = grepl("reference", .data[[names(final)[2]]])) |>
+    arrange(.ord, desc(.is_ref)) |>
+    select(-.var, -.ord, -.is_ref) |>
+    mutate(term = pretty_term(term))
   final_tab <- final |> gt() |>
     tab_header(title = paste("Final model:", r$outcome), subtitle = header) |>
-    tab_source_note(paste("Effect estimates (95% CI) of EVERY covariate in the final model (Q6d).",
-                          "Spline terms are shown per basis column.")) |>
+    tab_source_note(paste("Effect estimates (95% CI) of EVERY covariate in the final model (Q6d);",
+                          "for each categorical covariate the reference category is shown (1.00, or 0",
+                          "for risk differences). A spline of age or year (only if it improved the",
+                          "fit) is shown per basis column.")) |>
     tab_source_note(method_note) |> tab_source_note(var_note) |>
     tab_source_note(fn_cohort) |> tab_source_note(method_refs)
   mi_tab <- r$mi |> mutate(term = pretty_term(term)) |> gt() |>
@@ -644,6 +787,38 @@ if (nrow(summary_rt)) {
     tab_source_note(method_note) |> tab_source_note(var_note) |> tab_source_note(fn_cohort) |>
     tab_source_note(method_refs) |>
     gtsave(file.path(res_dir, "09_summary_rt.html"))
+}
+if (!is.null(em_breast_aya) && nrow(em_breast_aya)) {
+  em_breast_aya |>
+    mutate(interaction_p = signif(interaction_p, 2), interaction_q = signif(interaction_q, 2)) |>
+    select(modifier, level, smns, rt_estimate, interaction_p, interaction_q, note) |>
+    gt(groupname_col = "modifier") |>
+    cols_label(level = "Category", smns = "Breast cancers",
+               rt_estimate = "Breast in field vs not: rate ratio (95% CI), C1",
+               interaction_p = "Interaction p (LR test)", interaction_q = "q (FDR, 3 tests)",
+               note = "Note") |>
+    tab_header(title = "Additional effect-modification analysis: subsequent invasive breast cancer in women diagnosed with HL before age 40 (AYA)",
+               subtitle = "Breast RT exposure (in field vs not in field) within categories of each effect modifier") |>
+    tab_source_note(paste(
+      "Women aged 15-39 at HL diagnosis. Each modifier analysed separately, in women with a",
+      "known value. Models (C1, Poisson on person-time by time since diagnosis) adjusted for",
+      "age at diagnosis, year of diagnosis and an earlier other SMN (time-varying). Breast in",
+      "field: mantle, axilla, mediastinum, infraclavicular or lung field; not in field combines",
+      "bordering fields and no breast irradiation (decisions R2 draft, X1). Anthracycline",
+      "receipt: doxorubicin, epirubicin or other anthracycline / anthraquinone before the",
+      "start of follow-up. Ovarian failure is not recorded in the export; the proxy is ovarian",
+      "damage = pelvic RT (inverted Y or iliac field) or cumulative procarbazine > 4.2 g/m2",
+      "(decision R3; Swerdlow 2012; Krul 2017; Schaapveld 2015). Smoking: ever smoked. Invasive",
+      "breast cancer only (behaviour 3 or 9). Firth-penalised estimation when fewer than",
+      small_site, "breast cancers. q-values (Benjamini & Hochberg 1995) within these 3",
+      "interaction tests. ADDITIONAL analysis (EM-B); it does not change the main model.")) |>
+    tab_source_note(fn_cohort) |>
+    tab_source_note(paste("References:", fn_refs[["Swerdlow2012"]], ";", fn_refs[["Krul2017"]], ";",
+                          fn_refs[["Schaapveld2015"]], "; Benjamini Y, Hochberg Y. J R Stat Soc B 1995.",
+                          "doi:10.1111/j.2517-6161.1995.tb02031.x")) |>
+    gtsave(file.path(res_dir, "09_breast_aya_effect_modification.html"))
+  cat("\n== EM-B: breast cancer in AYA women ==\n")
+  print(as.data.frame(em_breast_aya |> select(level, smns, rt_estimate, interaction_p, interaction_q)))
 }
 saveRDS(results, file.path(res_dir, "09_models.Rds"))
 

@@ -12,6 +12,7 @@ All references were checked against PubMed, OpenAlex or Europe PMC; DOIs are giv
 | Date | Question | Decision (G. Watt) |
 |---|---|---|
 | 2026-10-14 | Q-RT1: primary RT exposure | **Approved.** Organ exposure has 3 levels: 0 = not irradiated, 1 = organ bordering a field, 2 = organ in field. **Addition:** also create variables for broad trends in HL radiotherapy technique: mediastinal vs involved field vs involved node. See section 1, "RT technique variables", for feasibility. |
+| 2026-10-14 | X1 (supersedes the 3-level primary exposure of Q-RT1) | **In all analyses, organ exposure is in field vs not in field**; "bordering field" is combined with "not irradiated". The 3-level variable is kept in the data. |
 | 2026-10-14 | Q-RT1a: RT technique variable | **Approved as proposed.** The first group is mantle / extended field (not "mediastinal"). The label "regional field (presumed involved field)" is accepted. `rt_mediastinal` is kept as a separate yes/no variable. |
 | 2026-10-14 | Q-CT1: primary anthracycline exposure | **Option A.** Cumulative doxorubicin dose (mg/m²); epirubicin as a separate yes/no; mitoxantrone/daunorubicin as a separate "other anthracycline/anthraquinone" yes/no. Option B (doxorubicin-equivalent, Feijen 2019 / IGHG ratios; COG ratios as a further check) is the sensitivity analysis. |
 | 2026-10-14 | Q-CT5 (cut-offs only) | **Neppelenbroek 2024 [C7] cut-offs.** Doxorubicin: 0 / 1–200 / >200 mg/m², plus continuous per 100 mg/m². Procarbazine: 0 / ≤4.2 / 4.3–8.4 / >8.4 g/m². The plausibility flags in Q-CT5 are still open. |

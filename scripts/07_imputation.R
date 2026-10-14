@@ -50,6 +50,12 @@
 #    category is too sparse for the substantive model. Treatment contrasts
 #    are used. If M3 still fails, M1 and M2 are produced and the failure is
 #    reported.
+# I9 (2026-10-14) Sex "other" excluded and the dichotomised era used (S1,
+#    E2): M3 failed on the real data with a sex category without events.
+# P-CACHE (2026-10-14) The imputations are cached (section 1b) and redone
+#    only when the data, the number of imputations, the imputation code or
+#    the package versions change (only 1 CPU core is available, so parallel
+#    imputation would not help).
 # I4 m = 20 imputed datasets (m = 5 for the dummy data, to keep test runs
 #    fast); seed fixed for reproducibility.
 # I5 Imputation applies to BASELINE exposure; time-varying analyses use the
@@ -77,10 +83,14 @@ pat <- readRDS(file.path(out_dir, "analysis_patients.Rds"))
 
 organ_cols <- grep("^organ_", names(pat), value = TRUE)
 
+# S1: patients with sex "other" are left out of the imputed datasets (they
+# would form a sex category without events, which made M3 fail on the real
+# data); era2 replaces era (E2).
 imp_data <- pat |>
+  filter(!is.na(sex_analysis)) |>
   transmute(
     researchid,
-    sex = factor(sex), age_dx, era = droplevels(era),
+    sex = droplevels(sex_analysis), age_dx, era = droplevels(era2),
     hl_histology = factor(case_when(
       hl_morph %in% 9663:9667 ~ "NS", hl_morph == 9652 ~ "MC",
       hl_morph == 9651 ~ "LR", hl_morph %in% 9653:9655 ~ "LD",
@@ -132,6 +142,35 @@ derive <- function(d) {
       )
     )
 }
+
+# ---- 1b. cache (P-CACHE) -----------------------------------------------------------
+
+# The imputations are the slow part of the pipeline and only need redoing
+# when their inputs change. The cache key combines: the imputation dataset
+# (imp_data, which includes the outcome), the number of imputations, the
+# code of this script up to the end of section 3 (so any change to the
+# imputation models invalidates the cache, while edits to the comparison
+# table do not), and the mice / smcfcs versions. If the key matches the
+# saved one, the saved imputations are loaded instead of recomputed.
+# Set force_imputation <- TRUE (or delete the cache file) to recompute.
+force_imputation <- FALSE
+this_script <- readLines(here("scripts", "07_imputation.R"))
+code_upto_3 <- this_script[seq_len(grep("^# ---- 4\\. descriptive comparison", this_script)[1] - 1)]
+cache_key <- rlang::hash(list(
+  imp_data, m_imp, code_upto_3,
+  as.character(packageVersion("mice")), as.character(packageVersion("smcfcs"))
+))
+cache_file <- file.path(out_dir, "imp_cache.Rds")
+cache <- if (file.exists(cache_file)) readRDS(cache_file) else NULL
+cache_hit <- !force_imputation && !is.null(cache) && identical(cache$key, cache_key)
+if (cache_hit) {
+  cat("Imputation cache HIT (", format(cache$created), "): inputs and code unchanged,",
+      "loading", m_imp, "imputed datasets instead of recomputing.\n")
+  imp_m2 <- cache$imp_m2
+  imp_m3 <- cache$imp_m3
+} else {
+  cat("Imputation cache MISS: inputs or code changed (or no cache); imputing.\n")
+  t_start <- Sys.time()
 
 # ---- 2. M2: MICE -------------------------------------------------------------------
 
@@ -233,6 +272,13 @@ imp_m3 <- if (is.null(smc_out)) NULL else lapply(seq_len(m_imp), function(i) {
              rt_pelvic == "0" & procarb_cat %in% c("0", "<=4.2") ~ 0L,
              TRUE ~ NA_integer_))
 })
+
+
+  cat("Imputation time:", round(as.numeric(difftime(Sys.time(), t_start, units = "mins")), 1),
+      "minutes\n")
+  saveRDS(list(key = cache_key, created = Sys.time(), imp_m2 = imp_m2, imp_m3 = imp_m3),
+          cache_file)
+}
 
 # ---- 4. descriptive comparison M1 / M2 / M3 ----------------------------------------
 

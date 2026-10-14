@@ -2232,85 +2232,90 @@ vertical-align: -.125em;
 </tr>
 <tr class="even">
 <td>2026-10-14</td>
+<td>X1 (supersedes the 3-level primary exposure of Q-RT1)</td>
+<td><strong>In all analyses, organ exposure is in field vs not in field</strong>; “bordering field” is combined with “not irradiated”. The 3-level variable is kept in the data.</td>
+</tr>
+<tr class="odd">
+<td>2026-10-14</td>
 <td>Q-RT1a: RT technique variable</td>
 <td><strong>Approved as proposed.</strong> The first group is mantle / extended field (not “mediastinal”). The label “regional field (presumed involved field)” is accepted. <code>rt_mediastinal</code> is kept as a separate yes/no variable.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>2026-10-14</td>
 <td>Q-CT1: primary anthracycline exposure</td>
 <td><strong>Option A.</strong> Cumulative doxorubicin dose (mg/m²); epirubicin as a separate yes/no; mitoxantrone/daunorubicin as a separate “other anthracycline/anthraquinone” yes/no. Option B (doxorubicin-equivalent, Feijen 2019 / IGHG ratios; COG ratios as a further check) is the sensitivity analysis.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>2026-10-14</td>
 <td>Q-CT5 (cut-offs only)</td>
 <td><strong>Neppelenbroek 2024 [C7] cut-offs.</strong> Doxorubicin: 0 / 1–200 / &gt;200 mg/m², plus continuous per 100 mg/m². Procarbazine: 0 / ≤4.2 / 4.3–8.4 / &gt;8.4 g/m². The plausibility flags in Q-CT5 are still open.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>2026-10-14</td>
 <td>Q-CT2: procarbazine</td>
 <td><strong>Cumulative procarbazine dose (mg/m²)</strong>, with no conversion of other alkylating agents. CED was not requested and is not computed unless asked for later.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>2026-10-14</td>
 <td>Q-CT5 (plausibility flags)</td>
 <td><strong>Approved.</strong> Records are listed for review if doxorubicin &gt; 450 mg/m² or procarbazine &gt; 12 g/m² without relapse treatment, or if ABVD cycles &gt; 8.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>2026-10-14</td>
 <td>Yes/no treatment variables</td>
 <td><strong>Keep doxorubicin yes/no and procarbazine yes/no</strong> alongside the doses. Two sources are kept and compared: (1) derived from the regimen codes (<code>doxo_any</code>, <code>procarb_any</code>; “unknown” when the regimen is unknown) and (2) the registry flags <code>anthrac</code> and <code>procarbazine</code> (0/1/9). Note that <code>anthrac</code> covers all anthracyclines, not only doxorubicin.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>2026-10-14</td>
 <td>Q-CT3: lookup corrections</td>
 <td><strong>Existing lookup numbers are kept unchanged</strong> for codes 58 (COPP), 69 (ChlVPP), 61 and 94 (MOPP/ABV(D) alternating, full per-cycle doses), 98 (ChlVPP/ABV, procarbazine dose 1000 is used despite flag “No”) and 105 (Pro-MACE, doxorubicin 25; only the text-to-code match is fixed). <strong>Code 83 (EBVP): epirubicin 70 mg/m² per cycle</strong>, following Neppelenbroek 2024 [C7]. This is used in the doxorubicin-equivalent sensitivity analysis; under option A, epirubicin is yes/no. <strong>Left missing:</strong> 223/224 (CNOP, CNOP-R), 70, 86 (Stanford V), 109 (EBVD), 225 (R-CHVmP-VB), 71. Their per-cycle doses stay NA, so cumulative dose is NA for patients who received them, while yes/no exposure is still derived from the regimen.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>2026-10-14</td>
 <td>Code 98 (ChlVPP/ABV) procarbazine</td>
 <td>Confirmed: it contains procarbazine; the primary dose stays <strong>1000 mg/m² per cycle</strong>. <strong>Sensitivity analysis S-CT98 added</strong> with 700 mg/m² per cycle (section 3), because the published hybrid schedules give 560–700 and 1000 could not be verified.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>2026-10-14</td>
 <td>Q-RT2: field-to-organ mapping</td>
 <td><strong>Approved as a draft; proceed with the analysis.</strong> <strong>To be shared with Berthe for approval</strong> before the mapping is final. Sarcoma and skin SMNs: <strong>match each tumour to the irradiated fields using its topography code where possible</strong> (e.g. trunk skin C44.5 vs mantle field); otherwise use any RT.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>2026-10-14</td>
 <td>Q-RT3: effect modifiers</td>
 <td><strong>Approved</strong>, with one change: breast-cancer <strong>ovarian damage = pelvic RT (inverted Y or iliac) OR high procarbazine dose</strong> (either one, not both). Lung × smoking and stomach/pancreas/colorectum × procarbazine as proposed.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>2026-10-14</td>
 <td>Q-RT4: prescribed RT dose</td>
 <td><strong>Not included for now.</strong> No Maraldo-based organ doses; era remains the dose surrogate in sensitivity analysis (b).</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>2026-10-14</td>
 <td>“Any SMN” definition</td>
 <td><strong>Non-melanoma skin cancer excluded</strong> from “any SMN” (kept as its own site). <strong>Unknown primary site (C80.9) included in “any SMN” only if invasive</strong> (behaviour 3).</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>2026-10-14</td>
 <td>Q-CT6: finer doxorubicin categories</td>
 <td><strong>Added as a sensitivity analysis:</strong> 0 / 1–200 / 201–349 / 350–700 mg/m² (Neppelenbroek 2024 [C7]). Primary cut-offs unchanged (0 / 1–200 / &gt;200, plus per 100 mg/m²). Used where case numbers allow (breast cancer as a minimum).</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>2026-10-14</td>
 <td>Q-RT3a: “high procarbazine” (ovarian damage)</td>
 <td><strong>&gt; 4.2 g/m²</strong> (≥ 4.3 g/m², Schaapveld 2015).</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>2026-10-14</td>
 <td>Q-RT3b: unknown smoking status</td>
 <td><strong>Listwise deletion</strong> in the lung × smoking models.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>2026-10-14</td>
 <td>Use of recorded RT doses (<code>rt*_dosistot</code>, <code>rt*_dose1–5</code>, boost fields)</td>
 <td><strong>Descriptive only:</strong> a table of prescribed dose by RT technique and diagnosis era, plus how complete dose recording is by era and hospital, in the RT exposure script (<code>03_rt-exposure.R</code>). Not used in models (consistent with Q-RT4).</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>2026-10-14</td>
 <td>Follow-up chemotherapy flag missing, no regimen recorded</td>
 <td>If <strong>no relapse recorded</strong> (<code>recur</code> = 0): code as <strong>“no relapse”</strong>. If a <strong>relapse is recorded</strong> (<code>recur</code> = 1): code as <strong>“no relapse chemotherapy”</strong>. Both give dose 0 and drug “no” for that course. If <code>recur</code> is missing, the course stays “unknown”. Implemented in <code>02_chemo-doses.R</code> as <code>ct_course_status</code> (D13).</td>

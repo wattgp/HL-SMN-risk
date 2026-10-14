@@ -567,8 +567,11 @@ smn_field_match <- smn_field_match |>
 smn_field_match <- smn_bt |>
   select(all_of(smn_keys)) |>
   left_join(smn_field_match, by = smn_keys) |>
-  mutate(region_exposure = factor(region_exposure, levels = 0:2,
-                                  labels = c("not irradiated", "bordering field", "in field")))
+  mutate(region_exposure_3 = factor(region_exposure, levels = 0:2,
+                                    labels = c("not irradiated", "bordering field", "in field")),
+         # X1 (2026-10-14): analyses use in field vs not in field.
+         region_exposure = factor(if_else(region_exposure == 2, "in field", "not in field"),
+                                  levels = c("not in field", "in field")))
 
 # ---- 7. checks with advice for action (printed; nothing is changed here) -------
 

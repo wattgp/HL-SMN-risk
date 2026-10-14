@@ -17,6 +17,11 @@
 # SAP A (2026-10-13): descriptive table with all variables relevant to the
 #    study of long-term HL survivors; continuous where appropriate, with
 #    interpretable categories (age groups C15; diagnosis eras C3).
+# F1 (2026-10-14) "Unknown" collapsed into Missing; Missing is a separate
+#    row without percentages (all tables).
+# F2 (2026-10-14) Dichotomous variables show both levels.
+# E2 (2026-10-14) Table 1 stratified by dichotomised era (1989-1999 /
+#    2000-latest), with both era variables as rows.
 # Q5 (2026-10-14): every table carries footnotes with all variable
 #    definitions and decisions, with citations (scripts/footnotes.R).
 # PROPOSED (not yet agreed): HL histology groups from the ICD-O-3
@@ -42,8 +47,10 @@ pat <- readRDS(file.path(out_dir, "analysis_patients.Rds"))
 smn_long <- readRDS(file.path(out_dir, "smn_long.Rds"))
 
 yn01 <- function(x) factor(x, levels = c(1, 0), labels = c("Yes", "No"))
-yn_chr <- function(x) factor(x, levels = c("yes", "no", "unknown"),
-                             labels = c("Yes", "No", "Unknown"))
+# F1 (2026-10-14): "Unknown" is collapsed into Missing (shown as a separate
+# row with a count and no percentage).
+yn_chr <- function(x) factor(if_else(x %in% c("yes", "no"), x, NA_character_),
+                             levels = c("yes", "no"), labels = c("Yes", "No"))
 
 # ---- 1. Table 1 -------------------------------------------------------------------
 
@@ -52,6 +59,7 @@ t1_data <- pat |>
     sex = factor(sex, levels = c("female", "male", "other"),
                  labels = c("Female", "Male", "Other")) |> droplevels(),
     era = droplevels(era),
+    era2 = droplevels(era2),
     hl_histology = case_when(
       hl_morph %in% 9663:9667 ~ "Nodular sclerosis",
       hl_morph == 9652 ~ "Mixed cellularity",
@@ -80,7 +88,7 @@ t1_data <- pat |>
                                             "Died without SMN"))
   ) |>
   select(
-    era, sex, age_dx, age_dx_group, age_dx_aya, hl_histology, smoke_ever, bmi_dx,
+    era2, era, sex, age_dx, age_dx_group, age_dx_aya, hl_histology, smoke_ever,
     doxo_any, doxo_dose, doxo_cat, doxo_cat_fine, epirubicin_any, other_anthra_any,
     procarb_any, procarb_dose, procarb_cat,
     rt_any, rt_technique, rt_cat_cb, rt_supra, rt_infra, rt_mediastinal, rt_pelvic,
@@ -90,11 +98,12 @@ t1_data <- pat |>
 
 table1 <- t1_data |>
   tbl_summary(
-    by = era,
+    by = era2,
     label = list(
+      era ~ "Era of HL diagnosis (3 groups)",
       sex ~ "Sex", age_dx ~ "Age at HL diagnosis, years",
       age_dx_group ~ "Age at HL diagnosis (groups)", age_dx_aya ~ "Age at HL diagnosis (AYA)",
-      hl_histology ~ "HL histology", smoke_ever ~ "Ever smoked", bmi_dx ~ "BMI at diagnosis",
+      hl_histology ~ "HL histology", smoke_ever ~ "Ever smoked",
       doxo_any ~ "Doxorubicin", doxo_dose ~ "Cumulative doxorubicin dose, mg/m²",
       doxo_cat ~ "Doxorubicin dose category, mg/m²",
       doxo_cat_fine ~ "Doxorubicin dose category (fine), mg/m²",
@@ -109,21 +118,27 @@ table1 <- t1_data |>
       time_any ~ "Follow-up from 5 years after diagnosis, years",
       outcome_any ~ "Status at end of follow-up"
     ),
-    type = list(c(age_dx, bmi_dx, doxo_dose, procarb_dose, time_any) ~ "continuous"),
+    # F2 (2026-10-14): dichotomous variables show BOTH levels (Yes and No).
+    type = list(all_dichotomous() ~ "categorical",
+                c(age_dx, doxo_dose, procarb_dose, time_any) ~ "continuous"),
     statistic = list(all_continuous() ~ "{median} ({p25}–{p75})",
                      all_categorical() ~ "{n} ({p}%)"),
     missing = "ifany", missing_text = "Missing"
   ) |>
   add_overall(last = FALSE) |>
   modify_header(label ~ "**Characteristic**") |>
-  modify_spanning_header(all_stat_cols(stat_0 = FALSE) ~ "**Era of HL diagnosis**") |>
-  modify_caption("**Table 1.** Characteristics of 5-year survivors of Hodgkin lymphoma, by era of diagnosis") |>
+  modify_spanning_header(all_stat_cols(stat_0 = FALSE) ~ "**Era of HL diagnosis (dichotomised)**") |>
+  modify_caption("**Table 1.** Characteristics of 5-year survivors of Hodgkin lymphoma, by era of diagnosis (1989-1999 vs 2000-latest)") |>
   bold_labels() |>
   add_variable_footnotes() # Q5: every variable definition and decision
 
 table1_gt <- as_gt(table1) |>
   tab_source_note(fn_cohort) |>
-  tab_source_note("Missing / Unknown values are shown separately and are not imputed in this table.") |>
+  tab_source_note(paste(
+    "Missing: unknown or not recorded (including values coded 'unknown'); shown as a count",
+    "without percentage; percentages are of patients with a known value. Not imputed in this",
+    "table. BMI at diagnosis is not shown: its values in the export cannot be read reliably",
+    "(data query Q14).")) |>
   tab_source_note(fn_refs_used(names(t1_data)))
 
 # ---- 2. Table 2: all invasive SMNs by site group ---------------------------------
@@ -151,7 +166,8 @@ table2_data <- smn_fu |>
     age_at_smn = fmt_med(age_smn),
     .groups = "drop"
   ) |>
-  mutate(own_analysis = if_else(patients >= min_cases_model, "Yes", "No")) |>
+  mutate(own_plots = if_else(patients >= min_cases_plot, "Yes", "No"),
+         own_models = if_else(patients >= min_cases_model, "Yes", "No")) |>
   arrange(desc(patients))
 
 table2 <- table2_data |>
@@ -161,7 +177,8 @@ table2 <- table2_data |>
     women = "Women", men = "Men",
     years_since_dx = "Years since HL diagnosis, median (IQR)",
     age_at_smn = "Age at SMN, median (IQR)",
-    own_analysis = paste0("≥", min_cases_model, " patients (own plots/models)")
+    own_plots = paste0("\u2265", min_cases_plot, " patients (own plots)"),
+    own_models = paste0(">", min_cases_model - 1, " patients (own models)")
   ) |>
   tab_header(title = "Table 2. Invasive subsequent malignant neoplasms during follow-up, by site group") |>
   tab_source_note(paste(
@@ -175,7 +192,9 @@ table2 <- table2_data |>
     "skin (C44) with morphology 8000-8110 (decision P8). A second HL (9650-9667) is not",
     "counted as an SMN (P6). Topographies recorded without subsite get a site group from",
     "the 3-character code (C19). Every site group is shown, however small (C11); sites",
-    "with fewer than", min_cases_model, "patients are not analysed on their own (C12).")) |>
+    "with fewer than", min_cases_plot, "patients get no own plots and sites with",
+    min_cases_model - 1, "or fewer no own multivariable models (C12, C12a). All site-specific",
+    "analyses count INVASIVE SMNs only (behaviour 3 or 9).")) |>
   tab_source_note(fn_cohort) |>
   tab_source_note(paste0("References: ", fn_refs[["Schaapveld2015"]], "; ", fn_refs[["SEER"]]))
 
@@ -204,5 +223,5 @@ saveRDS(list(table1 = table1, table2 = table2_data, table2b = table2b_data),
         file.path(res_dir, "06_descriptive.Rds"))
 
 cat("\nTables written to", res_dir, "(data:", if (use_dummy) "DUMMY" else "REAL", ")\n")
-cat("Sites with >=", min_cases_model, "patients:",
-    paste(table2_data$site_group[table2_data$own_analysis == "Yes"], collapse = "; "), "\n")
+cat("Sites with own models (>", min_cases_model - 1, "patients):",
+    paste(table2_data$site_group[table2_data$own_models == "Yes"], collapse = "; "), "\n")
