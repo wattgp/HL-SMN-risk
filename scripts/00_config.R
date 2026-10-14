@@ -40,3 +40,17 @@ lookup_files <- list(
   doxorubicin  = here("secure_data", "Doxorubicin-dosages-for-available-treatments.xlsx"),
   procarbazine = here("secure_data", "Procarbazine-dosages-for available-treatments.xlsx")
 )
+
+# ---- case-count thresholds for site-specific analyses ------------------------------
+
+# C12 (2026-10-14) Q: Minimum number of invasive SMNs of a site for it to get
+#    its own cumulative incidence plot and its own model? The SAP said > 20
+#    cases for plots and >= 50 for models (Objective 2).
+#    A: >= 10 for BOTH plots and models (project leader's decision; this is a
+#    deliberate change from the SAP). Sites below the threshold are still
+#    kept in the data and in the comprehensive SMN table.
+#    Note for the modelling stage: with as few as 10 events, models for a
+#    site can only support very few parameters, so covariates for small
+#    sites must be chosen sparingly (to be agreed per site).
+min_cases_plot <- 10
+min_cases_model <- 10
