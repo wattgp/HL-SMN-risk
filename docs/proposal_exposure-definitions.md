@@ -1,9 +1,34 @@
 # Proposal: treatment exposure definitions (radiotherapy organ exposure, anthracycline and procarbazine dose)
 
 HL-SMN-risk project, branch `sap-analysis`. Drafted 2026-10-13 for review by G. Watt (project leader).
-Status: **PROPOSAL, nothing below is implemented until approved.** Decisions will be logged in the scripts' decision logs.
+Status: **PROPOSAL, partly decided.** Decisions are recorded in the decision log below and will also be logged in the scripts' decision logs. Anything not in the decision log is not yet implemented.
 
 All references were checked against PubMed, OpenAlex or Europe PMC; DOIs are given. Statements marked *(unverified)* could not be checked against the primary source.
+
+---
+
+## Decision log
+
+| Date | Question | Decision (G. Watt) |
+|---|---|---|
+| 2026-10-14 | Q-RT1: primary RT exposure | **Approved.** Organ exposure has 3 levels: 0 = not irradiated, 1 = organ bordering a field, 2 = organ in field. **Addition:** also create variables for broad trends in HL radiotherapy technique: mediastinal vs involved field vs involved node. See section 1, "RT technique variables", for feasibility. |
+| 2026-10-14 | Q-RT1a: RT technique variable | **Approved as proposed.** The first group is mantle / extended field (not "mediastinal"). The label "regional field (presumed involved field)" is accepted. `rt_mediastinal` is kept as a separate yes/no variable. |
+| 2026-10-14 | Q-CT1: primary anthracycline exposure | **Option A.** Cumulative doxorubicin dose (mg/m²); epirubicin as a separate yes/no; mitoxantrone/daunorubicin as a separate "other anthracycline/anthraquinone" yes/no. Option B (doxorubicin-equivalent, Feijen 2019 / IGHG ratios; COG ratios as a further check) is the sensitivity analysis. |
+| 2026-10-14 | Q-CT5 (cut-offs only) | **Neppelenbroek 2024 [C7] cut-offs.** Doxorubicin: 0 / 1–200 / >200 mg/m², plus continuous per 100 mg/m². Procarbazine: 0 / ≤4.2 / 4.3–8.4 / >8.4 g/m². The plausibility flags in Q-CT5 are still open. |
+| 2026-10-14 | Q-CT2: procarbazine | **Cumulative procarbazine dose (mg/m²)**, with no conversion of other alkylating agents. CED was not requested and is not computed unless asked for later. |
+| 2026-10-14 | Q-CT5 (plausibility flags) | **Approved.** Records are listed for review if doxorubicin > 450 mg/m² or procarbazine > 12 g/m² without relapse treatment, or if ABVD cycles > 8. |
+| 2026-10-14 | Yes/no treatment variables | **Keep doxorubicin yes/no and procarbazine yes/no** alongside the doses. Two sources are kept and compared: (1) derived from the regimen codes (`doxo_any`, `procarb_any`; "unknown" when the regimen is unknown) and (2) the registry flags `anthrac` and `procarbazine` (0/1/9). Note that `anthrac` covers all anthracyclines, not only doxorubicin. |
+| 2026-10-14 | Q-CT3: lookup corrections | **Existing lookup numbers are kept unchanged** for codes 58 (COPP), 69 (ChlVPP), 61 and 94 (MOPP/ABV(D) alternating, full per-cycle doses), 98 (ChlVPP/ABV, procarbazine dose 1000 is used despite flag "No") and 105 (Pro-MACE, doxorubicin 25; only the text-to-code match is fixed). **Code 83 (EBVP): epirubicin 70 mg/m² per cycle**, following Neppelenbroek 2024 [C7]. This is used in the doxorubicin-equivalent sensitivity analysis; under option A, epirubicin is yes/no. **Left missing:** 223/224 (CNOP, CNOP-R), 70, 86 (Stanford V), 109 (EBVD), 225 (R-CHVmP-VB), 71. Their per-cycle doses stay NA, so cumulative dose is NA for patients who received them, while yes/no exposure is still derived from the regimen. |
+| 2026-10-14 | Code 98 (ChlVPP/ABV) procarbazine | Confirmed: it contains procarbazine; the primary dose stays **1000 mg/m² per cycle**. **Sensitivity analysis S-CT98 added** with 700 mg/m² per cycle (section 3), because the published hybrid schedules give 560–700 and 1000 could not be verified. |
+| 2026-10-14 | Q-RT2: field-to-organ mapping | **Approved as a draft; proceed with the analysis.** **To be shared with Berthe for approval** before the mapping is final. Sarcoma and skin SMNs: **match each tumour to the irradiated fields using its topography code where possible** (e.g. trunk skin C44.5 vs mantle field); otherwise use any RT. |
+| 2026-10-14 | Q-RT3: effect modifiers | **Approved**, with one change: breast-cancer **ovarian damage = pelvic RT (inverted Y or iliac) OR high procarbazine dose** (either one, not both). Lung × smoking and stomach/pancreas/colorectum × procarbazine as proposed. |
+| 2026-10-14 | Q-RT4: prescribed RT dose | **Not included for now.** No Maraldo-based organ doses; era remains the dose surrogate in sensitivity analysis (b). |
+| 2026-10-14 | "Any SMN" definition | **Non-melanoma skin cancer excluded** from "any SMN" (kept as its own site). **Unknown primary site (C80.9) included in "any SMN" only if invasive** (behaviour 3). |
+| 2026-10-14 | Q-CT6: finer doxorubicin categories | **Added as a sensitivity analysis:** 0 / 1–200 / 201–349 / 350–700 mg/m² (Neppelenbroek 2024 [C7]). Primary cut-offs unchanged (0 / 1–200 / >200, plus per 100 mg/m²). Used where case numbers allow (breast cancer as a minimum). |
+| 2026-10-14 | Q-RT3a: "high procarbazine" (ovarian damage) | **> 4.2 g/m²** (≥ 4.3 g/m², Schaapveld 2015). |
+| 2026-10-14 | Q-RT3b: unknown smoking status | **Listwise deletion** in the lung × smoking models. |
+| 2026-10-14 | Use of recorded RT doses (`rt*_dosistot`, `rt*_dose1–5`, boost fields) | **Descriptive only:** a table of prescribed dose by RT technique and diagnosis era, plus how complete dose recording is by era and hospital, in the RT exposure script (`03_rt-exposure.R`). Not used in models (consistent with Q-RT4). |
+| 2026-10-14 | Follow-up chemotherapy flag missing, no regimen recorded | If **no relapse recorded** (`recur` = 0): code as **"no relapse"**. If a **relapse is recorded** (`recur` = 1): code as **"no relapse chemotherapy"**. Both give dose 0 and drug "no" for that course. If `recur` is missing, the course stays "unknown". Implemented in `02_chemo-doses.R` as `ct_course_status` (D13). |
 
 ---
 
@@ -56,14 +81,38 @@ Proposed field-to-organ mapping. This is my synthesis of the evidence; no publis
 | Sarcoma, melanoma, non-melanoma skin | Any RT / volume. Mapping to a field needs the tumour topography (e.g. trunk skin C44.5 vs mantle), which is available, so it could be done per case if wanted | | Bone/soft-tissue sarcoma and BCC dose-response in CCSS [40,41]; melanoma not established |
 
 **Effect modifiers to include in site-specific models** (prespecified, from the literature):
-- Breast: pelvic RT (inverted Y, iliac) and high procarbazine dose, both markers of ovarian dose / early menopause [23,26].
-- Lung: smoking (`smoke_ever`) [28].
+- Breast: **ovarian damage**, defined as pelvic RT (inverted Y or iliac) **or** high procarbazine dose (decision Q-RT3, 2026-10-14). Both are markers of ovarian dose / early menopause [23,26]. "High" = > 4.2 g/m² (i.e. ≥ 4.3 g/m², the premature-menopause threshold in Schaapveld 2015 [1]) (decision Q-RT3a, 2026-10-14).
+- Lung: smoking (`smoke_ever`) [28]. Patients with unknown smoking status are excluded from these models (listwise deletion; decision Q-RT3b, 2026-10-14).
 - Stomach, pancreas, colorectum: procarbazine dose [30,32,14].
 
 **Sensitivity analyses**
 - (a) Binary version: in field (2) vs not (0 + 1).
 - (b) Treatment era as a dose surrogate. Prescribed doses fell over 1989–2013, from 36–40 Gy extended fields to 20–30 Gy involved field/node [42–48]. The actual Dutch dose distribution by era is not documented in what I found.
 - (c) If prescribed dose can be obtained (Q-RT4): typical relative organ dose from Maraldo 2015 for supradiaphragmatic organs (breast, lung, thyroid, oesophagus).
+
+### RT technique variables (added 2026-10-14, decision Q-RT1)
+
+**Purpose:** describe the shift in HL radiotherapy over 1989–2013, from extended fields to involved field to involved node [42–48]. This is a descriptive and trend variable that sits alongside the organ-level exposure.
+
+**Is it possible? Partly.**
+
+| Category | How it can be derived from the export | Reliability |
+|---|---|---|
+| Extended field (mantle, inverted Y, subtotal/total nodal) | `mantle*` = 1, or `invy*` = 1, or `abdom*` = 1, or mantle plus para-aortic/spleen. `rtsupraprim` = 2 (full mantle) and `rtcatprim` 3/4 also identify it | Good: these fields are recorded explicitly |
+| Mediastinal (as a field, without mantle) | `mediastprim` / `uppmediasprim` / `lowmediasprim` = 1 with mantle = 0 | Good as a field flag. But a mediastinal field can be part of involved-field *or* involved-node RT, so it is a **target region**, not a technique |
+| Involved node (INRT) | `invnode*` = 1 is recorded directly | Moderate. It depends on how consistently centres recorded "involved node" vs naming the individual fields. It also cannot be separated from ISRT (only relevant after about 2014) |
+| Involved field (IFRT) | **No explicit flag.** It can only be *presumed*: one or more regional fields (neck, supra/infraclavicular, axilla, mediastinum, lung, iliac, inguinal, para-aortic, spleen) with no mantle, inverted Y, full abdomen or involved-node flag. `rtsupraprim` = 1 ("incomplete mantle") partly overlaps | Weak. Disease extent at diagnosis is not in the export, so we cannot check that the fields matched the involved regions. "Regional field(s), presumed involved field" is the honest label |
+
+**Proposed variables** (per course and combined over courses before the start of follow-up):
+- `rt_technique`: no RT / extended field / regional field (presumed IFRT) / involved node / RT, technique unknown (`rt*` = 1 but no usable field flags, or field code 9).
+  - Hierarchy if several apply: extended > regional > involved node. This classifies by the *largest* volume given.
+- `rt_mediastinal`: mediastinum irradiated yes/no, across all techniques. It answers "mediastinal RT" separately from technique, because a mediastinal field can occur within any technique.
+- Cross-tabulated against diagnosis era (1989–1994 / 1995–2004 / 2005+) in the descriptive table to show the trend.
+
+**Checks on the real data before use:**
+- How often `invnode*` = 1 together with named regional fields (double recording).
+- Agreement between `rtcatprim` / `rtsupraprim` and the individual field flags.
+- Distribution of `rt_technique` by era. Extended field should fall and involved node should rise after about 2006 (EORTC H10 era [47]).
 
 ---
 
@@ -106,7 +155,18 @@ The mitoxantrone factor has a large effect: CNOP × 6 = 60 mg/m² mitoxantrone, 
 - **Proposal:**
   - Cumulative procarbazine dose (mg/m²), categorised 0 / ≤4.2 / 4.3–8.4 / >8.4 g/m², following Neppelenbroek 2024 [C7]. The 4.3 g/m² threshold relates to premature menopause [1].
   - The variable is named "cumulative procarbazine dose".
-- **Optional, for all alkylating agents:** cyclophosphamide-equivalent dose (CED; Green 2014 [C18]). It already includes procarbazine (factor 0.857), nitrogen mustard, chlorambucil, CCNU, BCNU, melphalan and others, but not dacarbazine.
+- **Optional, for all alkylating agents:** cyclophosphamide-equivalent dose (CED; Green 2014 [C18]). It already includes procarbazine (factor 0.857), nitrogen mustard, chlorambucil, CCNU, BCNU, melphalan and others, but not dacarbazine. *(Not requested, decision Q-CT2.)*
+
+**Sensitivity analysis S-CT98 (added 2026-10-14): ChlVPP/ABV procarbazine dose.**
+- **Primary:** code 98 (ChlVPP/ABV) uses the lookup value of **1000 mg/m² per cycle** (decision Q-CT3).
+- **Sensitivity:** **700 mg/m² per cycle**, the likely hybrid schedule.
+- **Why:**
+  - In hybrid ChlVPP regimens, the ChlVPP part is given on days 1–7 only, with ABV-type drugs on day 8. ChlVPP/ABVVP gives procarbazine 80 mg/m² on days 1–7, i.e. 560 per cycle.
+  - Full ChlVPP is 100 mg/m² on days 1–14 (1400 per cycle) [C23].
+  - No ChlVPP/ABV-specific schedule was found, so 1000 could not be verified.
+  - At 6 cycles the choice moves patients across the 4.2 g/m² cut-off: 1000 gives 6.0 g/m² (4.3–8.4), 700 gives 4.2 g/m² (≤4.2).
+- **Implementation:** `02_chemo-doses.R` computes both `procarb_dose` (primary) and `procarb_dose_s98` (sensitivity). Re-run procarbazine-dependent models with the sensitivity version.
+- **Report:** the number of patients who received code 98, and how many change procarbazine category. If none change category, state this and do not present the sensitivity models.
 
 ## 4. Lookup table corrections (per-cycle doses, mg/m²)
 
@@ -136,16 +196,20 @@ Verified as consistent with published schedules: ABVD 50, BEACOPP baseline 25/70
 
 ## Questions for the project leader
 
-- **Q-RT1.** Approve the 3-level organ exposure (none / bordering / in field) as the primary RT exposure, with the binary version as a sensitivity analysis?
-- **Q-RT2.** Approve the field-to-organ mapping table above, or amend it? Clinical input from a radiation oncologist would strengthen it.
-- **Q-RT3.** Approve the prespecified effect modifiers (breast × pelvic RT / procarbazine; lung × smoking; GI × procarbazine)?
-- **Q-RT4.** Roshani 2026 used total prescribed RT dose for this cohort. Can the prescribed dose be obtained from the NKI database for this export? If so, Maraldo-based relative organ doses become possible.
-- **Q-CT1.** Option A (doxorubicin + epirubicin flag) or B (doxorubicin-equivalent with Feijen ratios) as the primary anthracycline exposure?
-- **Q-CT2.** Procarbazine as its own cumulative dose (no conversion)? Also compute CED for all alkylating agents?
-- **Q-CT3.** Accept the lookup corrections (COPP, ChlVPP, EBVP, CNOP)? How are "cycles" counted for alternating MOPP/ABV(D)?
-- **Q-CT4.** Who can supply local protocol doses for codes 70, 86, 109, 225 and 71?
-- **Q-CT5.** Approve the cut-offs and the plausibility flags?
-- **Open from earlier:** exclude non-melanoma skin cancer and unknown primary (C80.9) from "any SMN"?
+- ~~**Q-RT1.** Approve the 3-level organ exposure (none / bordering / in field) as the primary RT exposure, with the binary version as a sensitivity analysis?~~ **Decided 2026-10-14** (see decision log).
+- ~~**Q-RT1a.** RT technique variable: did "mediastinal" mean mantle / extended field, and is the "regional field (presumed involved field)" label acceptable?~~ **Decided 2026-10-14** (see decision log).
+- ~~**Q-RT2.** Approve the field-to-organ mapping table?~~ **Decided 2026-10-14: approved as draft; share with Berthe for approval** (see decision log).
+- ~~**Q-RT3.** Approve the prespecified effect modifiers?~~ **Decided 2026-10-14: approved; ovarian damage = pelvic RT OR high procarbazine** (see decision log).
+- ~~**Q-RT3a.** Define "high procarbazine" as > 4.2 g/m²?~~ **Decided 2026-10-14: yes.**
+- ~~**Q-RT3b.** Lung × smoking: unknown smoking status?~~ **Decided 2026-10-14: listwise deletion.**
+- ~~**Q-RT4.** Can the prescribed dose be obtained?~~ **Decided 2026-10-14: do not include prescribed dose for now.**
+- ~~**Q-CT1.** Option A (doxorubicin + epirubicin flag) or B (doxorubicin-equivalent with Feijen ratios) as the primary anthracycline exposure?~~ **Decided 2026-10-14: option A** (see decision log).
+- ~~**Q-CT2.** Procarbazine as its own cumulative dose (no conversion)? Also compute CED?~~ **Decided 2026-10-14: cumulative procarbazine dose; no CED** (see decision log).
+- ~~**Q-CT3.** Accept the lookup corrections? How are "cycles" counted for alternating MOPP/ABV(D)?~~ **Decided 2026-10-14: keep existing numbers; EBVP epirubicin 70; others missing** (see decision log).
+- ~~**Q-CT4.** Who can supply local protocol doses for codes 70, 86, 109, 225 and 71?~~ **Resolved 2026-10-14 by Q-CT3: left missing.**
+- ~~**Q-CT5.** Approve the cut-offs and the plausibility flags?~~ **Decided 2026-10-14** (see decision log).
+- ~~**Open from earlier:** exclude non-melanoma skin cancer and unknown primary (C80.9) from "any SMN"?~~ **Decided 2026-10-14** (see decision log).
+- ~~**Q-CT6.** Add Neppelenbroek's finer doxorubicin split as a sensitivity analysis?~~ **Decided 2026-10-14: yes** (see decision log).
 
 ---
 
