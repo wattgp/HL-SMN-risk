@@ -81,6 +81,11 @@
 #    both cases the course contributes dose 0 and drug "no". If recur itself
 #    is missing, the course stays "unknown" (not covered by the decision).
 
+# D14 (2026-10-14) Q: Regimen code 0 (52 slots in the real data; not in
+#    chem_drugs.xlsx)? A: It means "no regimen in this slot": treated as an
+#    empty slot (no drug, no dose). If cycles are recorded with code 0 the
+#    slot becomes "unknown regimen".
+
 source(here::here("scripts", "00_config.R"))
 
 library(dplyr)
@@ -179,6 +184,16 @@ slots_long <- purrr::pmap_dfr(slot_cols, function(course, slot, code_col, cycles
     cycles_raw = raw[[cycles_col]]
   )
 }) |>
+  # D14: regimen code 0 means "no regimen in this slot" (it is not in the
+  # codebook's drug list). With no (or 0) cycles it is an empty slot; a code
+  # 0 WITH cycles recorded is contradictory and becomes "unknown regimen".
+  mutate(
+    code0 = str_trim(regimen_raw) %in% "0",
+    cycles0 = is.na(cycles_raw) | suppressWarnings(as.numeric(cycles_raw)) %in% 0,
+    regimen_raw = if_else(code0, NA_character_, regimen_raw),
+    cycles_raw = if_else(code0 & cycles0, NA_character_, cycles_raw)
+  ) |>
+  select(-code0, -cycles0) |>
   # A slot with neither a regimen nor a cycle count was not used: drop it.
   filter(!(is.na(regimen_raw) & is.na(cycles_raw))) |>
   mutate(

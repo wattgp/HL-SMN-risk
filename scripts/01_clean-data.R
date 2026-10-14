@@ -110,6 +110,10 @@
 #    primary or metastatic")? A: Count them as INVASIVE SMNs (is_invasive).
 #    SMNs with NO behaviour code are not counted; a check lists how many have
 #    a site and a date during follow-up, for review.
+# C19 (2026-10-14) Real data: some SMN topographies are recorded without a
+#    subsite (e.g. "C50" instead of "C50.4"). These are valid ICD-O sites
+#    and now get a site group (they were wrongly treated as malformed); they
+#    have no subsite, so their body region is "other / unspecified".
 # C11 (2026-10-14) Site groups (section 5): APPROVED as shown. Small site
 #    groups are NOT merged in the data: every group is kept in smn_long and
 #    outcome_site_long, and all groups appear in a comprehensive SMN table in
@@ -292,10 +296,15 @@ smn_long <- map_dfr(1:7, function(k) {
   mutate(
     morph = if_else(morph == 9999L, NA_integer_, morph), # codebook: 9999 unknown
     # Topography: upper case, without the dot, e.g. "C50.4" -> "C504".
-    topo = str_remove_all(str_to_upper(str_trim(topo_raw)), "\\."),
-    topo = if_else(str_detect(topo, "^C[0-9]{3}$"), topo, NA_character_),
-    topo3 = str_sub(topo, 1, 3), # e.g. "C50"
-    topo_num = as.integer(str_sub(topo, 2, 3)), # e.g. 50
+    topo_clean = str_remove_all(str_to_upper(str_trim(topo_raw)), "\\."),
+    # Full code with subsite, e.g. "C504"; NA if the subsite is missing.
+    topo = if_else(str_detect(topo_clean, "^C[0-9]{3}$"), topo_clean, NA_character_),
+    # C19: 3-character site, e.g. "C50". Also taken from codes recorded
+    # WITHOUT a subsite ("C50"), which are valid ICD-O sites; they get a
+    # site group but no subsite (body region "other / unspecified").
+    topo3 = if_else(str_detect(topo_clean, "^C[0-9]{2,3}$"),
+                    str_sub(topo_clean, 1, 3), NA_character_),
+    topo_num = as.integer(str_sub(topo3, 2, 3)), # e.g. 50
 
     # Behaviour category (C6).
     behav_cat = case_when(
@@ -728,10 +737,15 @@ if (n_review > 0) {
 }
 
 cat("\n== Topography values not in C00.0-C80.9 format (shown as recorded) ==\n")
-bad_topo <- smn_long |> filter(!is.na(topo_raw), is.na(topo)) |> count(topo_raw, sort = TRUE)
+no_subsite <- smn_long |> filter(!is.na(topo3), is.na(topo))
+cat("Recorded without a subsite (e.g. 'C50'; site group assigned, subsite unknown, C19):",
+    nrow(no_subsite), "\n")
+bad_topo <- smn_long |> filter(!is.na(topo_raw), is.na(topo3)) |> count(topo_raw, sort = TRUE)
 print(bad_topo, n = Inf)
-cat(if (nrow(bad_topo) > 0) "ACTION: fix these values in the source or add a recode rule; these SMNs get no site group.\n"
-    else "OK: all topographies are in C00.0-C80.9 format.\n")
+cat(if (nrow(bad_topo) > 0) "ACTION: these values are not ICD-O topography codes (e.g. 'C97'); fix them in the source or add a recode rule; these SMNs get a site group only from their morphology.\n"
+    else "OK: every topography is a valid ICD-O site code.\n")
+valid_icdo <- !is.na(smn_long$topo_num) & smn_long$topo_num <= 80
+cat(if (any(!is.na(smn_long$topo3) & !valid_icdo)) "ACTION: some codes are outside C00-C80 (listed above if malformed).\n" else "")
 
 cat("\n== Site groups: invasive SMNs during follow-up, analytic cohort ==\n")
 print(
@@ -780,8 +794,8 @@ cat("invasive SMN after recorded last contact (last contact moved to SMN date, C
     sum(pat$smn_after_lc), "\n")
 cat("invasive SMN with unknown date:", sum(pat$any_smn_undated), "\n")
 cat(
-  "topography not in C00.0-C80.9 format:",
-  sum(!is.na(smn_long$topo_raw) & is.na(smn_long$topo)), "\n"
+  "topography not a valid ICD-O site code (see check above):",
+  sum(!is.na(smn_long$topo_raw) & is.na(smn_long$topo3)), "\n"
 )
 
 # ---- 12. save ----------------------------------------------------------------------

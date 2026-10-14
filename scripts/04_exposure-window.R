@@ -76,6 +76,11 @@
 #    the project leader 2026-10-14: doxorubicin 550 mg/m2 (commonly cited maximum lifetime
 #    cumulative doxorubicin dose) and procarbazine 11,200 mg/m2 (8 cycles of
 #    MOPP, the longest standard procarbazine-containing schedule).
+# PRIM (2026-10-14) Q: Primary courses recorded 5+ years after diagnosis
+#    (12 chemotherapy, 7 RT in the real data)? A: Primary treatment is
+#    always within the first 5 years after diagnosis; trust the diagnosis
+#    date. Primary courses are ALWAYS baseline exposure, never time-varying
+#    (date_source flags those whose recorded date was 5+ years later).
 # W1 (2026-10-14) Q: Course with no start date? A: Approved. Primary course:
 #    assumed given at HL diagnosis (before follow-up). Follow-up course: the
 #    HL relapse date if known; otherwise assumed before the start of
@@ -154,6 +159,8 @@ place_course <- function(df, date_col, lag_years) {
         TRUE ~ date_dx # assumed before the start of follow-up (W1)
       ),
       date_source = case_when(
+        course == "prim" & !is.na(date_recorded) & date_recorded >= date_fup_start ~
+          "recorded >= 5 years after diagnosis; treated as primary (PRIM)",
         !is.na(date_recorded) ~ "recorded",
         course == "prim" ~ "assumed at HL diagnosis (W1)",
         !is.na(date_recur) ~ "HL relapse date (W1)",
@@ -162,10 +169,14 @@ place_course <- function(df, date_col, lag_years) {
       # W3: no lag before the start of follow-up; a course starting during
       # follow-up counts from its start date + lag_years.
       date_effective = if_else(
-        date_course < date_fup_start, date_course,
+        course == "prim" | date_course < date_fup_start, date_course,
         date_course %m+% days(round(lag_years * 365.25))
       ),
       window = case_when(
+        # PRIM: the primary course is ALWAYS baseline exposure, even if its
+        # recorded date is 5+ years after diagnosis (the diagnosis date is
+        # trusted; such a course date is taken to be wrong).
+        course == "prim" ~ "baseline",
         date_course < date_fup_start ~ "baseline",
         date_course > date_end_obs ~ "after end of observation (W2)",
         date_effective > date_end_obs ~ "during follow-up, lagged past end of observation (W3)",
@@ -586,6 +597,13 @@ advise(n_fup_assumed > 0,
               "patients, look up the dates in the source records; otherwise note the ",
               "number in the methods."),
        "every relapse course that was given has a recorded or relapse date.")
+n_prim_late <- sum(grepl("treated as primary", course_timing$date_source))
+advise(n_prim_late > 0,
+       paste0(n_prim_late, " primary course(s) have a recorded date 5+ years after ",
+              "diagnosis; they are treated as baseline primary treatment (PRIM). ",
+              "Their recorded dates are probably wrong: correct them in the source ",
+              "if possible, and report the number in the methods."),
+       "no primary course is dated 5+ years after diagnosis.")
 n_after_end <- sum(course_timing$window == "after end of observation (W2)")
 advise(n_after_end > 0,
        paste0(n_after_end, " course(s) start after the end of observation. Because follow-up ",
