@@ -1,5 +1,7 @@
 # run_all.R
-# Runs the data-preparation pipeline (01 -> 04) in order and saves everything
+# Runs the pipeline in order (01-04 data preparation, 05 analysis data,
+# 06 descriptive tables, 07 imputation, 08 cumulative incidence, 09 models)
+# and saves everything
 # each script prints (checks, OK:/ACTION: advice, messages, errors) to a
 # time-stamped log file per script, while still showing it in the console.
 #
@@ -13,7 +15,9 @@
 
 source(here::here("scripts", "00_config.R"))
 
-pipeline <- c("01_clean-data", "02_chemo-doses", "03_rt-exposure", "04_exposure-window")
+pipeline <- c("01_clean-data", "02_chemo-doses", "03_rt-exposure", "04_exposure-window",
+              "05_analysis-data", "06_descriptive", "07_imputation",
+              "08_cumulative-incidence", "09_models")
 
 log_dir <- file.path(out_dir, "logs")
 dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)

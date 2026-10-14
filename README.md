@@ -160,7 +160,12 @@ output of 01-03):
 | 2 | `scripts/02_chemo-doses.R` | Regimen code x cycles -> cumulative doxorubicin dose, procarbazine dose (+ sensitivity S-CT98), doxorubicin-equivalent dose (sensitivity), yes/no variables, registry flags, plausibility review list. Per treatment course, with start dates. | `chemo_slots_long.Rds`, `chemo_doses_course.Rds`, `chemo_registry_flags.Rds`, `chemo_dose_review.Rds` |
 | 3 | `scripts/03_rt-exposure.R` | RT field flags -> organ exposure (0/1/2) per SMN site, RT technique, mediastinal, pelvic, supra-/infradiaphragmatic RT; descriptive tables of recorded RT doses. Per course, with start dates. | `rt_fields_course.Rds`, `rt_organ_course.Rds`, `rt_dose_description.Rds` |
 | 4 | `scripts/04_exposure-window.R` | Joins 1-3. Places each treatment course in time (missing dates: rules W1-W3); baseline (fixed) exposure at the start of follow-up and time-varying exposure after it; dose categories; ovarian damage; sarcoma/skin SMNs matched to RT fields by body region (descriptive). | `exposure_baseline.Rds`, `exposure_tv.Rds`, `course_timing.Rds`, `smn_field_match.Rds` |
-| 5 | *(to do)* analysis | Descriptive table (gtsummary), cumulative incidence with death as competing risk, multivariable models, exploratory ML for breast cancer, figures. Replaces `SMN-risk.qmd`. | `output/` |
+| 5 | `scripts/05_analysis-data.R` | Analysis datasets: cohort + baseline exposure; holds out patients with key outstanding data questions (DQ); outcomes under the main and last-contact (C17-LC) follow-up rules. | `analysis_patients.Rds`, `analysis_site_long.Rds`, `analysis_tv.Rds`, `dq_hold.Rds` |
+| 6 | `scripts/06_descriptive.R` | SAP part A: Table 1 (by era), Table 2 (all SMN site groups), Table 2b (behaviour). | `output/<dummy|real>/06_*.html` |
+| 7 | `scripts/07_imputation.R` | Missing data: complete case (M1), MICE (M2) and SMC-FCS (M3) in parallel; comparison table. | `imp_m2_mice.Rds`, `imp_m3_smcfcs.Rds`, `output/<dummy|real>/07_imputation_comparison.html` |
+| 8 | `scripts/08_cumulative-incidence.R` | SAP part B: Aalen-Johansen cumulative incidence + Gray's test (B1), attained age (B3), restricted mean time lost (B4); plots for any SMN and sites with >= 10 SMNs; C17-LC sensitivity. B5 (SIR/AER) later. | `output/<dummy|real>/08_*.png`, `08_table3_*.html`, `08_table4_rmtl.html` |
+| 9 | `scripts/09_models.R` | SAP part C, RT as primary exposure: base model (RT + age + year; spline only if LR-significant) -> effect modification first (stratified estimates + LR interaction tests, incl. chemotherapy and time since diagnosis) -> confounding (>=10% change or lower AIC) -> final model by C1 Poisson, C2 Cox, C3 pseudo-observations; Firth for sites with <20 SMNs; M1 vs M2/M3 comparison. All covariate estimates reported. | `output/<dummy|real>/09_<outcome>.html`, `09_summary_rt.html` |
+| 10 | *(to do)* machine learning | SAP part D: breast cancer, lasso/elastic net (primary), random survival forests (secondary). | – |
 
 Run the whole pipeline in one go, with a log per script:
 
@@ -183,8 +188,10 @@ source(here::here("scripts", "04_exposure-window.R"))  # needs the output of 01-
 Each script prints checks (counts, cross-tables, records to review) when it
 runs. Read them after every run on the real data.
 
-Output is saved in `output`. Anything that is included in the manuscripts
-should be findable here.
+Output is saved in `output/real/` (real data) and `output/dummy/` (dummy
+data). **Tables and figures are never committed** (`.gitignore` ignores
+everything in `output/` except its README): real-data results contain
+aggregate patient data and stay on the analysis server.
 
 ### Repository layout
 
@@ -197,7 +204,14 @@ scripts/
   02_chemo-doses.R                 chemotherapy regimens -> doses and yes/no exposure
   03_rt-exposure.R                 RT field flags -> organ exposure, RT technique
   04_exposure-window.R             baseline and time-varying exposure for the analytic cohort
-  run_all.R                        runs 01-04 in order, with a log per script
+  05_analysis-data.R               analysis datasets, data-quality hold, outcomes (main + last-contact rule)
+  06_descriptive.R                 Table 1, SMN tables (SAP part A)
+  07_imputation.R                  missing data: complete case, MICE, SMC-FCS
+  08_cumulative-incidence.R        cumulative incidence, attained age, RMTL (SAP part B)
+  09_models.R                      models: effect modification, confounding, C1/C2/C3 (SAP part C)
+  footnotes.R                      shared table footnotes: variable definitions + citations
+  run_all.R                        runs 01-09 in order, with a log per script
+  data_manager_queries.R           ResearchID lists for the data-manager queries
   make_dummy_dataset.R             builds the synthetic dummy dataset from the real export
   SMN-risk.qmd                     OLD analysis file (old variable names; to be replaced)
   anthra_dose_Eline.R              old anthracycline dose code (reference only; different coding)
@@ -205,6 +219,8 @@ scripts/
   stata/                           2015 NEJM Stata cleaning/analysis code (reference only)
 docs/
   proposal_exposure-definitions.md/.html   exposure definitions, decision log, references
+  proposal_analysis-methods.md             options for imputation and SAP parts B-E
+  data-manager-queries.md                  queries for the data manager
 output/                            figures and tables for the manuscripts
 secure_data/                       NOT in git: raw and intermediate data (see below)
 renv.lock, renv/                   pinned R package versions

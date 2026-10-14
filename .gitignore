@@ -29,3 +29,9 @@
 /.quarto/
 
 **/*.quarto_ipynb
+
+# Analysis output (tables, figures) is NEVER committed: real-data results
+# contain aggregate patient data, and dummy output is only for testing.
+# Everything under output/ is ignored except its README.
+/output/*
+!/output/README.md
