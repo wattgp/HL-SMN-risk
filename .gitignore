@@ -27,3 +27,5 @@
 
 # Quarto render cache (can contain computed results)
 /.quarto/
+
+**/*.quarto_ipynb
